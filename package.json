@@ -117,8 +117,8 @@
         },
         "openaistudio.modelRouter": {
           "type": "string",
-          "default": "mistral",
-          "markdownDescription": "**nginx path** для CEO / аналізу задачі (повертає JSON). Має бути найшвидшою моделлю. Сервер: `mistral` → 0.296s, 4096 токенів."
+          "default": "gemma",
+          "markdownDescription": "**Model name** для CEO / аналізу задачі (повертає JSON). Сервер: `gemma` → 2.1s, 16384 токенів. Mistral виключено через обмеження 4096 токенів."
         },
         "openaistudio.modelCodeHeavy": {
           "type": "string",

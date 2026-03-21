@@ -40,7 +40,7 @@ export class VLLMModelBackend {
         //
         // ⚠️  qwen-code path ≠ qwen3-coder model name — kept separate below.
         // ── Configurable overrides ───────────────────────────────────────────
-        const modelRouter    = config.get<string>("modelRouter",    "mistral").trim();
+        const modelRouter    = config.get<string>("modelRouter",    "gemma").trim();
         const modelCodeHeavy = config.get<string>("modelCodeHeavy", "codestral").trim();
         // FIX: nginx routes by actual model name, not container name.
         // Path is /qwen3-coder/v1, NOT /qwen-code/v1
@@ -93,9 +93,9 @@ export class VLLMModelBackend {
         this.model     = this.urlPath; // nginx path == model name on this server
         this.maxTokens = PATH_CONTEXT[this.urlPath] ?? 16_384;
 
-        // CEO hard cap: leave room for output within mistral's 4096 total
-        if (this.urlPath === "mistral") {
-            this.maxTokens = 4_096;
+        // CEO hard cap: gemma has 16384 tokens — reserve 35% for output
+        if (this.urlPath === modelRouter) {
+            this.maxTokens = PATH_CONTEXT[this.urlPath] ?? 16_384;
         }
 
         // ── Build final base URL ──────────────────────────────────────────────
