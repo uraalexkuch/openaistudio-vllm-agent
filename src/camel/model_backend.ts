@@ -191,6 +191,30 @@ export class VLLMModelBackend {
                 }
             }
 
+            // 5b. Final strict alternation pass — required by Mistral (and good practice).
+            // After truncation, consecutive same-role messages may appear again.
+            // Merge them, then ensure the sequence starts with 'user'.
+            const alternated: any[] = [];
+            for (const msg of processedMessages) {
+                if (alternated.length > 0 && alternated[alternated.length - 1].role === msg.role) {
+                    // Merge into previous
+                    alternated[alternated.length - 1].content += "\n\n" + msg.content;
+                } else {
+                    alternated.push({ role: msg.role, content: msg.content });
+                }
+            }
+            // Must start with user
+            if (alternated.length > 0 && alternated[0].role === "assistant") {
+                alternated.unshift({ role: "user", content: "Continue." });
+            }
+            // Must end with user (the last message is what the model responds to)
+            // If it ends with assistant, add a nudge — but this shouldn't normally happen.
+            if (alternated.length > 0 && alternated[alternated.length - 1].role === "assistant") {
+                alternated.push({ role: "user", content: "Continue." });
+            }
+            processedMessages = alternated;
+            totalChars = processedMessages.reduce((sum, m) => sum + m.content.length, 0);
+
             // 6. Compute output budget from actual (post-truncation) input estimate.
             const estimatedInputTokens = this.estimateTokens(totalChars);
             const availableForOutput   = this.maxTokens - estimatedInputTokens;
