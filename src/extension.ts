@@ -204,13 +204,14 @@ CRITICAL RULES:
 - "dependsOn" lists names of phases that must finish first ([] for start phases)
 
 IMPORTANT — SINGLE FILE RULE:
-If the entire deliverable is ONE FILE (e.g. a single .html, .py, .js file), use EXACTLY this 3-phase structure:
+If the entire deliverable is ONE FILE (e.g. a single .html, .py, .js), use EXACTLY this 3-phase structure:
 {"complexity":"Low","phases":[
   {"name":"Coding","role":"Programmer","dependsOn":[]},
   {"name":"Code Review","role":"Code Reviewer","dependsOn":["Coding"]},
   {"name":"Documentation","role":"Technical Writer","dependsOn":["Code Review"]}
 ]}
-Do NOT split a single file into separate HTML/CSS/JS phases — all code goes in one Coding phase.
+For HTML games/apps: ONE single .html file with all CSS and JS INLINE (not separate files).
+Do NOT split into separate HTML/CSS/JS files unless the task explicitly asks for it.
 
 FORBIDDEN — never create phases with these names (launching is done INSIDE Coding phase):
 "Demonstration", "Demo", "Testing & Demonstration", "Test & Demo", "Launch", "Run", "Execute"

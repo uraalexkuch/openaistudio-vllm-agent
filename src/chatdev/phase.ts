@@ -142,6 +142,25 @@ export class Phase {
             this.onEvent?.({ type: 'answer_stream_end' });
             finalCodeOrResult += assistantResponse + "\n";
 
+            // Guard: if Code Reviewer outputs <DONE> on the very first turn without
+            // having called read_file, it skipped the review. Inject a reminder.
+            const isFirstTurn      = turn === 0;
+            const calledTool       = assistantResponse.includes('<tool_call>') ||
+                assistantResponse.includes('tool_result') ||
+                finalCodeOrResult.includes('saved successfully');
+            const isReviewer       = assistantName.toLowerCase().includes('reviewer');
+            const doneWithoutWork  = isFirstTurn && isReviewer && !calledTool &&
+                this.checkTermination(assistantResponse);
+
+            if (doneWithoutWork) {
+                // Override: inject a corrective message so reviewer actually reads the file
+                this.onEvent?.({ type: 'narration', content: `⚠️ Code Reviewer skipped review — injecting read_file reminder` });
+                currentMessage = `You output <DONE> without reading any files. ` +
+                    `You MUST call read_file on the saved file(s) first, then provide a real review. ` +
+                    `Do NOT output <DONE> until you have actually reviewed the code.`;
+                continue; // skip <DONE>, loop again
+            }
+
             if (this.checkTermination(assistantResponse)) {
                 break;
             }
