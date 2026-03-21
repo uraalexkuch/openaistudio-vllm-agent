@@ -9,11 +9,11 @@ export class Phase {
     private maxTurns: number;
 
     constructor(
-        phaseName: string, 
-        assistantRole: string, 
-        userRole: string, 
-        assistantPrompt: string, 
-        userPrompt: string, 
+        phaseName: string,
+        assistantRole: string,
+        userRole: string,
+        assistantPrompt: string,
+        userPrompt: string,
         maxTurns = 5
     ) {
         this.phaseName = phaseName;
@@ -30,94 +30,119 @@ export class Phase {
     async execute(taskPrompt: string): Promise<string> {
         console.log(`Starting Phase: ${this.phaseName}`);
         this.onEvent?.({ type: 'narration', content: `Розпочато фазу: ${this.phaseName}` });
-        
-        // Отримуємо релевантні навички (skills) для assistantAgent
+
+        // FIX 1: Load skills but inject them as REFERENCE ONLY — not as a conversation to continue.
+        // Skills are appended AFTER the role description so the model sees its actual identity first.
+        // The framing explicitly tells the model to use skills as patterns, not to respond to them.
         const loadedSkills = await autoLoadSkillsForTask(`${this.assistantAgent.getRoleName()} ${taskPrompt}`);
         if (loadedSkills.length > 0) {
-            const skillsText = `=== АКТУАЛЬНІ НАВИЧКИ (SKILLS) ===\n${loadedSkills.map(s => `[${s.name}]:\n${s.content}`).join('\n\n')}\n==================================\nВідповідай УКРАЇНСЬКОЮ мовою.`;
-            this.assistantAgent.addSystemContext(skillsText);
+            const skillNames = loadedSkills.map(s => s.name).join(', ');
+            console.log(`[Phase:${this.phaseName}] Injecting skills: ${skillNames}`);
+
+            const skillsContext = [
+                `=== REFERENCE SKILLS (read-only patterns — do NOT respond to these examples) ===`,
+                ...loadedSkills.map(s => `--- SKILL: ${s.name} ---\n${s.content}`),
+                `=== END OF REFERENCE SKILLS ===`,
+                `Use the patterns above ONLY if they are directly relevant to the current task.`,
+                `If no skill is relevant, ignore them entirely.`,
+            ].join('\n\n');
+
+            this.assistantAgent.addSystemContext(skillsContext);
         }
 
-        this.assistantAgent.addSystemContext("Коли ти повністю виконав свою частину завдання або відповів на питання, обов'язково додай в кінці своєї відповіді слово <DONE>.");
-        this.userAgent.addSystemContext("Коли ти перевірив результат і більше не маєш правок або зауважень, обов'язково додай в кінці своєї відповіді слово <DONE>.");
+        // FIX 2: Language control — agents reason in English internally but the final
+        // user-visible answer must be in Ukrainian (or whatever language the task uses).
+        this.assistantAgent.addSystemContext(
+            `LANGUAGE RULE: You may think and reason in English internally. ` +
+            `Your final response visible in the chat MUST be in Ukrainian (uk-UA) ` +
+            `unless the task explicitly uses a different language.`
+        );
+        this.userAgent.addSystemContext(
+            `LANGUAGE RULE: Your feedback and questions MUST be in Ukrainian (uk-UA).`
+        );
 
-        let currentMessage = taskPrompt;
+        // FIX 3: <DONE> instruction injected LAST so it is the most recent context.
+        this.assistantAgent.addSystemContext(
+            `When you have fully completed your part of the task, append exactly <DONE> at the end of your response.`
+        );
+        this.userAgent.addSystemContext(
+            `When you have reviewed the result and have no more corrections or questions, append exactly <DONE> at the end of your response.`
+        );
 
+        // FIX 4: Wrap the task so the model clearly sees "THIS is what I need to do"
+        // rather than potentially treating skill examples as context to continue.
+        const wrappedTaskPrompt = [
+            `=== YOUR CURRENT TASK (phase: ${this.phaseName}) ===`,
+            taskPrompt.trim(),
+            `=== END OF TASK ===`,
+            `Focus exclusively on the task above. Do not discuss the reference skills.`,
+        ].join('\n');
+
+        let currentMessage = wrappedTaskPrompt;
         let finalCodeOrResult = "";
 
         for (let turn = 0; turn < this.maxTurns; turn++) {
             this.onEvent?.({ type: 'step', step: turn + 1, totalSteps: this.maxTurns });
-            
-            // Assistant Agent processes message
-            const assistantName = this.assistantAgent.getRoleName();
+
+            const assistantName  = this.assistantAgent.getRoleName();
             const assistantModel = this.assistantAgent.getModelName();
             const actionDesc = turn === 0 ? `аналізує задачу та складає план` : `виконує підзадачу та готує відповідь`;
-            
-            this.onEvent?.({ 
-                type: 'thinking', 
+
+            this.onEvent?.({
+                type: 'thinking',
                 role: assistantName,
                 model: assistantModel,
-                content: `[${assistantName}] ${actionDesc}...` 
+                content: `[${assistantName}] ${actionDesc}...`
             });
-            
-            this.onEvent?.({ 
+
+            this.onEvent?.({
                 type: 'answer_stream_start',
                 role: assistantName,
                 model: assistantModel
             });
 
             const assistantResponse = await this.assistantAgent.step(currentMessage, 0.2, (token) => {
-                this.onEvent?.({
-                    type: 'answer_stream_chunk',
-                    content: token
-                });
+                this.onEvent?.({ type: 'answer_stream_chunk', content: token });
             });
-            
+
             this.onEvent?.({ type: 'answer_stream_end' });
             finalCodeOrResult += assistantResponse + "\n";
-            
+
             if (this.checkTermination(assistantResponse)) {
                 break;
             }
 
-            // User Agent responds back
-            const userName = this.userAgent.getRoleName();
+            const userName  = this.userAgent.getRoleName();
             const userModel = this.userAgent.getModelName();
-            this.onEvent?.({ 
-                type: 'thinking', 
+            this.onEvent?.({
+                type: 'thinking',
                 role: userName,
                 model: userModel,
-                content: `[${userName}] перевіряє результат та дає фідбек...` 
+                content: `[${userName}] перевіряє результат та дає фідбек...`
             });
-            
-            this.onEvent?.({ 
+
+            this.onEvent?.({
                 type: 'answer_stream_start',
                 role: userName,
                 model: userModel
             });
 
             currentMessage = await this.userAgent.step(assistantResponse, 0.2, (token) => {
-                this.onEvent?.({
-                    type: 'answer_stream_chunk',
-                    content: token
-                });
+                this.onEvent?.({ type: 'answer_stream_chunk', content: token });
             });
-            
+
             this.onEvent?.({ type: 'answer_stream_end' });
 
             if (this.checkTermination(currentMessage)) {
-
                 break;
             }
         }
 
-        
         this.onEvent?.({ type: 'done' });
         return finalCodeOrResult;
     }
 
     private checkTermination(message: string): boolean {
-        // Standard OpenAIStudio termination markers
         return message.includes("<CAMEL_TASK_DONE>") || message.includes("<DONE>");
     }
 }

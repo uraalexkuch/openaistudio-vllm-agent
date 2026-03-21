@@ -18,12 +18,10 @@ export interface LoadedSkill extends SkillMeta {
 }
 
 export function getSkillsPath(): string {
-  // Читаємо шлях зі налаштувань розширення (openaistudio.skillsPath)
   const configured = vscode.workspace.getConfiguration('openaistudio').get<string>('skillsPath', '');
   if (configured && typeof configured === 'string' && configured.trim() !== '') {
     return configured;
   }
-  // Повертаємо порожній рядок — шлях має бути вказаний користувачем
   return '';
 }
 
@@ -105,27 +103,12 @@ const STOP = new Set([
   'мені','мене','мій','моя','моє','мої','мого',
 ]);
 
+// FIX: Restrict generic action verbs from the translation map.
+// Previously "напиши", "створи", etc. mapped to ["create","implement","write"] which
+// matched almost every skill. Now action verbs are NOT translated — only domain nouns
+// and technical terms are, so skill matching is based on WHAT to build, not HOW.
 const UA_EN: Record<string, string[]> = {
-  'поясни':     ['explain', 'describe', 'overview'],
-  'поясніть':   ['explain', 'describe'],
-  'опиши':      ['describe', 'overview', 'explain'],
-  'проаналізуй':['analyze', 'analysis', 'review'],
-  'перевір':    ['check', 'verify', 'validate', 'review'],
-  'виправ':     ['fix', 'debug', 'repair'],
-  'налагодь':   ['debug', 'troubleshoot'],
-  'оптимізуй':  ['optimize', 'performance', 'refactor'],
-  'рефактор':   ['refactor', 'clean', 'restructure'],
-  'задокументуй':['document', 'documentation', 'docs'],
-  'документацію':['documentation', 'docs', 'readme'],
-  'напиши':     ['write', 'create', 'implement'],
-  'створи':     ['create', 'build', 'implement'],
-  'додай':      ['add', 'implement', 'create'],
-  'видали':     ['delete', 'remove'],
-  'встанови':   ['install', 'setup', 'configure'],
-  'налаштуй':   ['configure', 'setup', 'settings'],
-  'запусти':    ['run', 'execute', 'start'],
-  'розгорни':   ['deploy', 'deployment'],
-  'протестуй':  ['test', 'testing'],
+  // Domain nouns — safe to translate
   'структуру':  ['structure', 'architecture', 'overview', 'project'],
   'архітектуру':['architecture', 'structure', 'design'],
   'проєкту':    ['project', 'codebase', 'repository'],
@@ -135,7 +118,16 @@ const UA_EN: Record<string, string[]> = {
   'апі':        ['api', 'rest', 'endpoint'],
   'безпека':    ['security', 'auth', 'authentication'],
   'тести':      ['tests', 'testing', 'unit-test'],
-  'деплой':     ['deploy', 'deployment', 'ci-cd']
+  'деплой':     ['deploy', 'deployment', 'ci-cd'],
+  'документацію':['documentation', 'docs', 'readme'],
+  'базу':       ['database', 'db', 'sql'],
+  'гру':        ['game', 'gaming'],
+  'гра':        ['game', 'gaming'],
+  'хрестики':   ['game', 'tictactoe', 'html'],
+  'ноліки':     ['game', 'tictactoe', 'html'],
+  'сторінку':   ['html', 'page', 'frontend', 'web'],
+  'сайт':       ['website', 'html', 'frontend', 'web'],
+  'скрипт':     ['script', 'javascript', 'python'],
 };
 
 function expandWithTranslations(tokens: string[]): string[] {
@@ -269,7 +261,9 @@ function extractQueryTokens(text: string): string[] {
 export function scanAndScoreAllSkillsIdf(
     combined:      string,
     alreadyLoaded: Set<string> = new Set(),
-    minScore       = 4,
+    // FIX: raised default minScore from 4 → 7 to prevent false-positive skill matches
+    // on short/generic tasks. Only skills with strong topical overlap will be loaded.
+    minScore       = 7,
 ): SkillMeta[] {
   const skillsPath = getSkillsPath();
   if (!skillsPath || !fs.existsSync(skillsPath)) return [];
@@ -343,11 +337,19 @@ export async function autoLoadSkillsForTask(
   const combined = [task, workspaceContext].filter(Boolean).join('\n');
   if (!combined.trim()) return [];
 
-  const allScored = scanAndScoreAllSkillsIdf(combined, new Set(), 4);
+  // FIX: Use minScore=7 as primary threshold. Only fall back to minScore=5
+  // (not 2 as before) to avoid loading completely unrelated skills.
+  const allScored = scanAndScoreAllSkillsIdf(combined, new Set(), 7);
 
   if (allScored.length === 0) {
-    const fallback = scanAndScoreAllSkillsIdf(combined, new Set(), 2);
-    return loadTopSkills(fallback, maxSkills);
+    // Soft fallback: try a moderately lower bar before giving up
+    const fallback = scanAndScoreAllSkillsIdf(combined, new Set(), 5);
+    if (fallback.length > 0) {
+      console.log(`[Skills] Primary threshold found nothing; using fallback (score≥5). Skills: ${fallback.slice(0, maxSkills).map(s => s.name).join(', ')}`);
+      return loadTopSkills(fallback, maxSkills);
+    }
+    console.log(`[Skills] No relevant skills found for task. Proceeding without skills.`);
+    return [];
   }
 
   return loadTopSkills(allScored, maxSkills);
@@ -369,15 +371,14 @@ export async function saveSkill(
 
     const fileContent = `---\nname: ${name}\ndescription: ${description || ''}\ntags: [auto-generated]\n---\n\n${content}`;
 
-    // Запитуємо підтвердження у користувача
     const confirm = await vscode.window.showInformationMessage(
         `Зберегти новий скіл "${name}"?\nОпис: ${description}`,
         { modal: true },
         'Так', 'Ні'
     );
-    
+
     if (confirm !== 'Так') {
-        return 'User rejected saving the skill.';
+      return 'User rejected saving the skill.';
     }
 
     fs.mkdirSync(skillDir, { recursive: true });
@@ -389,4 +390,3 @@ export async function saveSkill(
     return `Failed to save skill: ${e.message}`;
   }
 }
-
