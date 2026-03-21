@@ -10,6 +10,9 @@ import { Phase } from './chatdev/phase';
 import { WorkspaceManager } from './chatdev/workspace';
 import { VLLMModelBackend } from './camel/model_backend';
 
+let globalSessionContext = "";
+let isExecuting = false;
+
 interface RoleEntry {
     model?: string;
     description?: string;
@@ -169,15 +172,23 @@ async function syncSkills(context: vscode.ExtensionContext): Promise<void> {
 
 /** Executes the full project pipeline with a given idea */
 async function executeProject(idea: string, context: vscode.ExtensionContext) {
+    if (isExecuting) {
+        vscode.window.showWarningMessage('⏳ OpenAIStudio: Зачекайте завершення попереднього завдання!');
+        ChatWebview.currentPanel?.broadcastEvent({ type: 'error', content: '⏳ Зачекайте завершення попереднього завдання або зупиніть його (команда Stop All Agents).' });
+        return;
+    }
+
+    isExecuting = true;
     const config = vscode.workspace.getConfiguration('openaistudio');
     const vllmUrl = config.get<string>('vllmUrl', '');
     if (!vllmUrl) {
+        isExecuting = false;
         vscode.window.showErrorMessage('❌ vLLM URL не вказано.');
         return;
     }
 
-    // Load role configuration from RoleConfig.json
-    const configPath = path.join(context.extensionPath, 'src', 'config', 'RoleConfig.json');
+        // Load role configuration from RoleConfig.json
+        const configPath = path.join(context.extensionPath, 'src', 'config', 'RoleConfig.json');
     let roleConfig: Record<string, RoleEntry> = {};
     if (fs.existsSync(configPath)) {
         try {
@@ -191,7 +202,14 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
     // Open the Chat UI
     ChatWebview.createOrShow(context.extensionUri);
     ChatWebview.currentPanel?.notifyStart();
-    ChatWebview.currentPanel?.broadcastEvent({ type: 'narration', content: `🚀 Запуск проєкту: ${idea}` });
+
+    let fullExecutionPrompt = idea;
+    if (globalSessionContext) {
+        fullExecutionPrompt = `Історія попередніх сесій та контекст проекту:\n${globalSessionContext}\nНове завдання користувача: ${idea}`;
+        ChatWebview.currentPanel?.broadcastEvent({ type: 'narration', content: `🔄 Продовження роботи над проектом` });
+    } else {
+        ChatWebview.currentPanel?.broadcastEvent({ type: 'narration', content: `🚀 Запуск проєкту: ${idea}` });
+    }
     ChatWebview.currentPanel?.broadcastEvent({ type: 'narration', content: `🔌 vLLM: ${vllmUrl}` });
 
     // Initialize engine
@@ -203,7 +221,7 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
     let requiredPhases = PIPELINE.map(p => p.phaseName);
     try {
         const analyzer = new VLLMModelBackend("Chief Executive Officer");
-        const analysisPrompt = `Ось завдання: "${idea}". 
+        const analysisPrompt = `Ось поточне завдання з історією: "${fullExecutionPrompt}". 
 Які технічні етапи конче необхідні для реалізації? 
 Дай відповідь у форматі JSON масиву рядків. Можливі варіанти:
 - "System Architecture" (завжди потрібен)
@@ -254,11 +272,25 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
     }
 
     try {
-        await chatChain.execute(idea);
+        const env = await chatChain.execute(fullExecutionPrompt);
+        
+        globalSessionContext += `\n[Користувач]: ${idea}\n`;
+        const phaseKeys = Object.keys(env);
+        if (phaseKeys.length > 0) {
+            const lastPhase = phaseKeys[phaseKeys.length - 1];
+            let output = env[lastPhase] || "";
+            if (output.length > 2000) {
+                output = output.substring(0, 2000) + "... (контент скорочено)";
+            }
+            globalSessionContext += `[Результат (${lastPhase})]:\n${output}\n---\n`;
+        }
+        
         ChatWebview.currentPanel?.broadcastEvent({ type: 'narration', content: "✅ Процес завершено." });
         ChatWebview.currentPanel?.broadcastEvent({ type: 'done' });
     } catch (e: any) {
         ChatWebview.currentPanel?.broadcastEvent({ type: 'error', content: `❌ Помилка: ${e.message}` });
+    } finally {
+        isExecuting = false;
     }
 }
 
@@ -281,6 +313,8 @@ export function activate(context: vscode.ExtensionContext) {
 
         // 3. New Task Command (from Command Palette)
         context.subscriptions.push(vscode.commands.registerCommand('openaistudio.newTask', async () => {
+            globalSessionContext = "";
+            vscode.window.showInformationMessage('OpenAIStudio: Почато нове завдання (контекст очищено).');
             ChatWebview.createOrShow(context.extensionUri);
         }));
 
@@ -294,6 +328,7 @@ export function activate(context: vscode.ExtensionContext) {
 
         // 4. Stop Agents
         context.subscriptions.push(vscode.commands.registerCommand('openaistudio.stopAgent', () => {
+            isExecuting = false;
             ChatWebview.currentPanel?.dispose();
         }));
 
