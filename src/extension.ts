@@ -220,6 +220,10 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
     ChatWebview.createOrShow(context.extensionUri);
     ChatWebview.currentPanel?.notifyStart();
 
+    // Reset complexity for the new task
+    VLLMModelBackend.currentTaskComplexity = "Low";
+
+
     let fullExecutionPrompt = idea;
     if (globalSessionContext) {
         fullExecutionPrompt = `Історія попередніх сесій:\n${globalSessionContext}\nНове завдання: ${idea}`;
@@ -248,6 +252,7 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
                 "PRELIMINARY EVALUATION: Estimate the number of 'distinct developer operations' (e.g. creating a file, auditing security, optimizing DB).\n" +
                 "LIGHT PROJECTS (Estimated operations < 5): Use 3 roles (Programmer, Code Reviewer, Technical Writer).\n" +
                 "HEAVY PROJECTS (Estimated operations >= 5): Use 8 roles (CEO, CTO, DB Expert, Security, Programmer, Test Engineer, Code Reviewer, Technical Writer).\n" +
+                "IMPORTANT: If the task is a simple game or script, choose LIGHT PROJECTS and SKIP Database/Security roles.\n" +
                 "Return ONLY valid JSON including 'estimated_operations' (integer), 'justification' (short string), 'complexity' ('Low' or 'High'), and 'plan' (an array of phases).\n" +
                 "IMPORTANT: Respond ONLY with a valid JSON object.";
 
