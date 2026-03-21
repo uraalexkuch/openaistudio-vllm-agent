@@ -39,14 +39,14 @@ export class VLLMModelBackend {
         } else {
             // Documenter, CCO, etc.
             this.model = defaultModel; // e.g. gemma
-            this.maxTokens = 16384; 
+            this.maxTokens = 16384;
         }
 
         this.model = this.model.trim();
 
         // 3. Construct dynamic baseURL: http://IP:PORT/<model>/v1
         let base = rawBaseURL.replace(/\/+$/, "").replace(/\/v1$/, "");
-        
+
         let finalBaseURL: string;
         if (base.toLowerCase().endsWith(this.model.toLowerCase())) {
             finalBaseURL = `${base}/v1`;
@@ -55,7 +55,7 @@ export class VLLMModelBackend {
         }
 
         finalBaseURL = finalBaseURL.replace(/([^:]\/)\/+/g, "$1");
-        
+
         console.log(`VLLMModelBackend: [${roleName}] rawURL: ${rawBaseURL} -> Final URL: ${finalBaseURL}`);
         console.log(`VLLMModelBackend: Using Model: "${this.model}"`);
 
@@ -63,7 +63,7 @@ export class VLLMModelBackend {
             baseURL: finalBaseURL,
             apiKey: apiKey,
         });
-        
+
         console.log(`VLLMModelBackend: OpenAI client initialized for ${finalBaseURL}`);
     }
 
@@ -73,21 +73,19 @@ export class VLLMModelBackend {
 
     async step(messages: ChatMessage[], temperature = 0.2, onToken?: (token: string) => void): Promise<string> {
         try {
-            const requestedOutputTokens = Math.floor(this.maxTokens * 0.7); 
-            
             // Compatibility Fix: Strictly alternate roles user/assistant.
             // Some vLLM models (Mistral) throw 400 if roles don't alternate or system is present.
             let processedMessages: any[] = [];
-            
+
             // 1. Handle system message by merging it into the first user message
             let systemContent = "";
             let originalMessages = [...messages];
-            
+
             if (originalMessages.length > 0 && originalMessages[0].role === "system") {
                 systemContent = originalMessages[0].content;
                 originalMessages.shift();
             }
-            
+
             // 2. Merge consecutive messages of the same role
             for (const msg of originalMessages) {
                 if (processedMessages.length > 0 && processedMessages[processedMessages.length - 1].role === msg.role) {
@@ -96,7 +94,7 @@ export class VLLMModelBackend {
                     processedMessages.push({ role: msg.role, content: msg.content });
                 }
             }
-            
+
             // 3. If we had a system message, inject it into the first message (which must be 'user')
             if (systemContent) {
                 if (processedMessages.length > 0 && processedMessages[0].role === "user") {
@@ -106,17 +104,17 @@ export class VLLMModelBackend {
                     processedMessages.unshift({ role: "user", content: `[SYSTEM]\n${systemContent}` });
                 }
             }
-            
+
             // 4. Ensure it starts with 'user' (some backends require this)
             if (processedMessages.length > 0 && processedMessages[0].role === "assistant") {
                 processedMessages.unshift({ role: "user", content: "Continue." });
             }
 
             // 5. Final Safety Truncation: Ensure we don't exceed the model's absolute character limit
-            // A rough estimate: 4 chars per token. 
+            // A rough estimate: 4 chars per token.
             const charLimit = this.maxTokens * 4;
             let totalChars = processedMessages.reduce((sum, m) => sum + m.content.length, 0);
-            
+
             if (totalChars > charLimit) {
                 console.warn(`VLLMModelBackend: Truncating request from ${totalChars} to ${charLimit} chars.`);
                 // Keep the most recent messages, but always keep the first one (which contains system instructions now)
@@ -134,6 +132,24 @@ export class VLLMModelBackend {
                     }
                 }
             }
+
+            // 6. FIX: Dynamically budget output tokens so input + output never exceeds maxTokens.
+            //    Estimate input tokens at ~4 chars/token, then leave the remainder for output,
+            //    capped at 70% of maxTokens so responses don't exhaust the whole window.
+            const CHARS_PER_TOKEN = 4;
+            const SAFETY_MARGIN   = 64; // small buffer to absorb tokenizer rounding
+            const estimatedInputTokens = Math.ceil(totalChars / CHARS_PER_TOKEN) + SAFETY_MARGIN;
+            const availableForOutput   = this.maxTokens - estimatedInputTokens;
+            const maxOutputTokens70pct = Math.floor(this.maxTokens * 0.7);
+            const requestedOutputTokens = Math.max(
+                256,  // always allow at least a short reply
+                Math.min(maxOutputTokens70pct, availableForOutput)
+            );
+
+            console.log(
+                `VLLMModelBackend [${this.model}]: estimatedInput=${estimatedInputTokens} ` +
+                `available=${availableForOutput} requestedOutput=${requestedOutputTokens}`
+            );
 
             if (onToken) {
                 const stream = await this.openai.chat.completions.create({
