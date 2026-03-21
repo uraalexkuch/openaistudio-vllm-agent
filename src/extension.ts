@@ -8,6 +8,7 @@ import { ChatWebview } from './ui/chat_webview';
 import { ChatChain } from './chatdev/chat_chain';
 import { Phase } from './chatdev/phase';
 import { WorkspaceManager } from './chatdev/workspace';
+import { VLLMModelBackend } from './camel/model_backend';
 
 interface RoleEntry {
     model?: string;
@@ -197,8 +198,45 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
     const chatChain = new ChatChain();
     chatChain.onEvent = (ev) => ChatWebview.currentPanel?.broadcastEvent(ev);
 
+    ChatWebview.currentPanel?.broadcastEvent({ type: 'narration', content: `🔍 Аналізую необхідні етапи для завдання...` });
+    
+    let requiredPhases = PIPELINE.map(p => p.phaseName);
+    try {
+        const analyzer = new VLLMModelBackend("Chief Executive Officer");
+        const analysisPrompt = `Ось завдання: "${idea}". 
+Які технічні етапи конче необхідні для реалізації? 
+Дай відповідь у форматі JSON масиву рядків. Можливі варіанти:
+- "System Architecture" (завжди потрібен)
+- "Database Optimization" (тільки якщо є збереження даних, бази даних, складна логіка стану)
+- "Security Audit" (тільки якщо є бекенд, API, авторизація, захист даних)
+- "Coding" (завжди потрібен)
+- "Documentation" (завжди потрібен)
+
+Поверни ТІЛЬКИ валідний JSON масив без маркдауну, без пояснень.
+Наприклад: ["System Architecture", "Coding", "Documentation"]`;
+
+        const response = await analyzer.step([
+            { role: "system", content: "Ти досвідчений системний архітектор. Повертай ТІЛЬКИ валідний JSON." },
+            { role: "user", content: analysisPrompt }
+        ]);
+        
+        const cleanedResponse = response.replace(/```json/gi, "").replace(/```/g, "").trim();
+        const parsed = JSON.parse(cleanedResponse);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+            requiredPhases = parsed;
+            ChatWebview.currentPanel?.broadcastEvent({ type: 'narration', content: `⚙️ Вибрані етапи: ${requiredPhases.join(', ')}` });
+        }
+    } catch (e) {
+        console.error("Failed to parse required phases, using defaults", e);
+    }
+
+    const actualPipeline = PIPELINE.filter(step => requiredPhases.includes(step.phaseName));
+    if (actualPipeline.length === 0) {
+        actualPipeline.push(...PIPELINE);
+    }
+
     // Build phases
-    for (const step of PIPELINE) {
+    for (const step of actualPipeline) {
         const assistantConfig = roleConfig[step.assistantRole] || {};
         const userConfig = roleConfig[step.userRole] || {};
 
