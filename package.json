@@ -97,28 +97,43 @@
       "properties": {
         "openaistudio.vllmUrl": {
           "type": "string",
-          "default": "http://10.1.0.102:8050/v1",
-          "description": "URL вашого локального сервера vLLM (OpenAI-сумісний)"
+          "default": "http://10.1.0.102:8050",
+          "description": "Базовий URL вашого vLLM сервера БЕЗ /v1 в кінці. Код автоматично додає /<model>/v1 до кожного запиту. Приклад: http://10.1.0.102:8050"
         },
         "openaistudio.apiKey": {
           "type": "string",
           "default": "EMPTY",
-          "description": "API ключ для vLLM (зазвичай EMPTY)"
-        },
-        "openaistudio.model": {
-          "type": "string",
-          "default": "gemma",
-          "description": "Назва моделі за замовчуванням у vLLM"
+          "description": "API ключ для vLLM (зазвичай EMPTY для локального сервера)"
         },
         "openaistudio.perplexicaUrl": {
           "type": "string",
           "default": "",
-          "description": "URL локального сервера Perplexica для веб-пошуку"
+          "description": "URL локального сервера Perplexica для веб-пошуку агентів. Приклад: http://localhost:3001"
         },
         "openaistudio.skillsPath": {
           "type": "string",
           "default": "",
-          "description": "Повний шлях до директорії зі скілами (SKILL.md)"
+          "description": "Повний шлях до директорії зі скілами (SKILL.md файлами). Приклад: C:\\Users\\User\\Documents\\antigravity-awesome-skills"
+        },
+        "openaistudio.modelRouter": {
+          "type": "string",
+          "default": "mistral",
+          "markdownDescription": "**nginx path** для CEO / аналізу задачі (повертає JSON). Має бути найшвидшою моделлю. Сервер: `mistral` → 0.296s, 4096 токенів."
+        },
+        "openaistudio.modelCodeHeavy": {
+          "type": "string",
+          "default": "codestral",
+          "markdownDescription": "**nginx path** для складного коду (Complexity=High). Сервер: `codestral` → 1.969s, 32768 токенів."
+        },
+        "openaistudio.modelCodeLight": {
+          "type": "string",
+          "default": "qwen-code",
+          "markdownDescription": "**nginx path** для швидкого коду (Complexity=Low) та code review. Сервер: `qwen-code` → model id `qwen3-coder`, 0.765s, 32768 токенів. ⚠️ Шлях `qwen-code` ≠ назва моделі `qwen3-coder` — це обробляється автоматично."
+        },
+        "openaistudio.modelGeneral": {
+          "type": "string",
+          "default": "gemma",
+          "markdownDescription": "**nginx path** для загальних ролей (Technical Writer, CPO, документація). Сервер: `gemma` → 2.123s, 16384 токенів."
         }
       }
     }

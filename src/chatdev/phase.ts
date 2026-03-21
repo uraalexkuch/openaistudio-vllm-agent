@@ -1,6 +1,10 @@
 import { ChatAgent } from "../camel/chat_agent";
 import { RoleType } from "../camel/typing";
 import { autoLoadSkillsForTask } from "./skills";
+import { getToolsDescription } from "./tools";
+
+// Phases where the assistant actively needs to write/launch files
+const FILE_TOOL_PHASES = new Set(["Coding", "Documentation", "ArchitectureRevision"]);
 
 export class Phase {
     public phaseName: string;
@@ -48,6 +52,12 @@ export class Phase {
             ].join('\n\n');
 
             this.assistantAgent.addSystemContext(skillsContext);
+        }
+
+        // Inject tool schema for phases that produce files or need to launch demos.
+        // Only for the assistant (the one doing the work), not the reviewer/user agent.
+        if (FILE_TOOL_PHASES.has(this.phaseName)) {
+            this.assistantAgent.addSystemContext(getToolsDescription());
         }
 
         // FIX 2: Language control — agents reason in English internally but the final
