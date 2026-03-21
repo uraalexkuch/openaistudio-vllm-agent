@@ -136,8 +136,11 @@ export class VLLMModelBackend {
     }
 
     async step(messages: ChatMessage[], temperature = 0.2, onToken?: (token: string) => void): Promise<string> {
+        // Declared outside try so the catch block can reference them for the 404 retry.
+        let processedMessages: any[] = [];
+        let requestedOutputTokens = 256;
+
         try {
-            let processedMessages: any[] = [];
 
             // 1. Extract system message
             let systemContent = "";
