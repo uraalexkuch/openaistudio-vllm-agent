@@ -54,12 +54,17 @@ export class Phase {
             this.assistantAgent.addSystemContext(skillsContext);
         }
 
-        // Inject tool schema for phases that produce/read files.
-        // Both assistant AND user get tools in CodeReview: reviewer uses read_file,
-        // programmer (userAgent) uses write_file to apply fixes.
+        // Inject tool schema ONLY for the assistant agent (the one doing the work).
+        // userAgent (CTO, CPO reviewing) must NOT get tool descriptions —
+        // they were responding AS IF executing tools which breaks the flow entirely.
         if (FILE_TOOL_PHASES.has(this.phaseName)) {
             this.assistantAgent.addSystemContext(getToolsDescription());
-            this.userAgent.addSystemContext(getToolsDescription());
+            // userAgent gets a brief reminder NOT to execute tools
+            this.userAgent.addSystemContext(
+                `IMPORTANT: You are a reviewer. Do NOT call any tools yourself. ` +
+                `Do NOT write <tool_call> or <tool_result> tags. ` +
+                `Only read the assistant's output and provide feedback or output <DONE>.`
+            );
         }
 
         // FIX 2: Language control — agents reason in English internally but the final

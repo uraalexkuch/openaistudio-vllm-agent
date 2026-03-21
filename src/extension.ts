@@ -204,13 +204,16 @@ CRITICAL RULES:
 - "dependsOn" lists names of phases that must finish first ([] for start phases)
 
 IMPORTANT — SINGLE FILE RULE:
-If the entire deliverable is ONE FILE (e.g. a single .html, .py, .js file), use EXACTLY this structure:
+If the entire deliverable is ONE FILE (e.g. a single .html, .py, .js file), use EXACTLY this 3-phase structure:
 {"complexity":"Low","phases":[
   {"name":"Coding","role":"Programmer","dependsOn":[]},
   {"name":"Code Review","role":"Code Reviewer","dependsOn":["Coding"]},
   {"name":"Documentation","role":"Technical Writer","dependsOn":["Code Review"]}
 ]}
 Do NOT split a single file into separate HTML/CSS/JS phases — all code goes in one Coding phase.
+
+FORBIDDEN — never create phases with these names (launching is done INSIDE Coding phase):
+"Demonstration", "Demo", "Testing & Demonstration", "Test & Demo", "Launch", "Run", "Execute"
 
 Parallel phases are ONLY for genuinely independent deliverables (e.g. separate frontend + backend servers).
 
@@ -314,10 +317,15 @@ Example fullstack (two separate servers):
         const phaseKeys = Object.keys(env);
         if (phaseKeys.length > 0) {
             const lastPhase = phaseKeys[phaseKeys.length - 1];
-            // Prefer summary over raw output to keep context compact
-            let output = env[`${lastPhase}_summary`] || env[lastPhase] || "";
-            if (output.length > 2000) output = output.substring(0, 2000) + "... (скорочено)";
-            globalSessionContext += `[Результат (${lastPhase})]:\n${output}\n---\n`;
+            // Store only the summary (not raw output with file contents)
+            // to keep context compact and avoid confusing next run
+            let output = env[`${lastPhase}_summary`] || "";
+            if (output.length > 1000) output = output.substring(0, 1000) + "…";
+            if (output) globalSessionContext += `[Результат (${lastPhase})]:\n${output}\n---\n`;
+        }
+        // Cap total session context to prevent prompt overflow
+        if (globalSessionContext.length > 3000) {
+            globalSessionContext = globalSessionContext.substring(globalSessionContext.length - 3000);
         }
 
         ChatWebview.currentPanel?.broadcastEvent({ type: 'narration', content: "✅ Процес завершено." });

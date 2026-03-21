@@ -52,6 +52,7 @@ export class ChatChain {
         this.onEvent?.({ type: "narration", content: `📢 ПЛАН ДІЙ:\n${planDescription}` });
 
         const completedSummaries: Record<string, string> = {};
+        const savedFiles: string[] = []; // track filenames written by agents
         const done      = new Set<string>();
         const inFlight  = new Set<string>();
 
@@ -64,8 +65,15 @@ export class ChatChain {
             const parts = Object.entries(completedSummaries)
                 .map(([name, summary]) => `[${name}]:\n${summary}`)
                 .join("\n\n");
+
+            // Tell subsequent phases which files exist in workspace
+            const fileHint = savedFiles.length > 0
+                ? `\nFILES IN WORKSPACE: ${savedFiles.join(', ')}\n` +
+                `(Code Reviewer: use read_file to inspect these files)`
+                : '';
+
             return parts
-                ? `=== SUMMARIES OF COMPLETED PHASES ===\n${parts}\n\n=== TASK ===\n${taskPrompt}`
+                ? `=== SUMMARIES OF COMPLETED PHASES ===\n${parts}${fileHint}\n\n=== TASK ===\n${taskPrompt}`
                 : taskPrompt;
         };
 
@@ -94,6 +102,13 @@ export class ChatChain {
             completedSummaries[phase.phaseName] = summary;
             this.chatEnv[`${phase.phaseName}_output`]  = rawResult;
             this.chatEnv[`${phase.phaseName}_summary`] = summary;
+
+            // Extract filenames from tool results so next phases know what exists
+            const fileMatches = rawResult.match(/File "([^"]+)" saved successfully/gi) || [];
+            for (const m of fileMatches) {
+                const fn = m.match(/File "([^"]+)"/i)?.[1];
+                if (fn && !savedFiles.includes(fn)) savedFiles.push(fn);
+            }
 
             done.delete(phase.phaseName); // remove from in-flight tracking
             done.add(phase.phaseName);

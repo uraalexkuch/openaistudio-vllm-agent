@@ -11,17 +11,65 @@ export interface ToolCall {
     args: any;
 }
 
+// All tool names the system knows about — used for fallback bare-tag parsing
+const KNOWN_TOOL_NAMES = [
+    'write_file', 'read_file', 'list_files', 'make_directory',
+    'launch_file', 'execute_bash', 'verify_file',
+    'web_search', 'delegate_to_expert', 'save_skill',
+].join('|');
+
+function tryParseArgs(raw: string): any {
+    const s = raw.trim();
+    if (!s) return {};
+    // Strip inner <args>...</args> wrapper if present
+    const inner = s.replace(/^<args>([\s\S]*?)<\/args>$/i, '$1').trim();
+    try { return JSON.parse(inner || '{}'); } catch { return { query: inner }; }
+}
+
+/**
+ * Multi-strategy tool call parser.
+ * Handles all formats observed in production:
+ *   1. <tool_call><n>name</n><args>{}</args></tool_call>  — standard
+ *   2. <tool_call><name>...</name></tool_call>            — tag IS name, with/without <args>
+ *   3. <name>...</name>                                   — bare tag, no tool_call wrapper
+ *   4. <name/>  <name attr="v"/>                          — self-closing
+ */
 export function parseToolCall(responseText: string): ToolCall | null {
-    // Flexible: matches <n>tool</n> OR <n>tool</name> — handles model tag inconsistencies
-    const regex = /<tool_call>[\s\S]*?<\w+>(.*?)<\/\w+>[\s\S]*?<args>([\s\S]*?)<\/args>[\s\S]*?<\/tool_call>/i;
-    const match = responseText.match(regex);
-    if (match) {
-        try {
-            return { name: match[1].trim(), args: JSON.parse(match[2].trim()) };
-        } catch (e) {
-            return { name: match[1].trim(), args: { query: match[2].trim() } };
+    const knownRe = KNOWN_TOOL_NAMES;
+
+    // Strategy 1: standard <tool_call><anyTag>name</anyTag><args>{}</args></tool_call>
+    const s1 = responseText.match(/<tool_call>[\s\S]*?<\w+>([\s\S]*?)<\/\w+>[\s\S]*?<args>([\s\S]*?)<\/args>[\s\S]*?<\/tool_call>/i);
+    if (s1) {
+        const name = s1[1].trim();
+        if (name) {
+            try { return { name, args: JSON.parse(s1[2].trim()) }; }
+            catch { return { name, args: { query: s1[2].trim() } }; }
         }
     }
+
+    // Strategy 2: <tool_call>...<known_name>...(optional <args>)...</known_name>...</tool_call>
+    const s2re = new RegExp(
+        `<tool_call>[\\s\\S]*?<(${knownRe})>([\\s\\S]*?)<\/\\1>[\\s\\S]*?<\/tool_call>`, 'i'
+    );
+    const s2 = responseText.match(s2re);
+    if (s2) {
+        return { name: s2[1].trim(), args: tryParseArgs(s2[2]) };
+    }
+
+    // Strategy 3: bare <known_name>...</known_name> anywhere
+    const s3re = new RegExp(`<(${knownRe})>([\\s\\S]*?)<\/\\1>`, 'i');
+    const s3 = responseText.match(s3re);
+    if (s3) {
+        return { name: s3[1].trim(), args: tryParseArgs(s3[2]) };
+    }
+
+    // Strategy 4: self-closing <known_name/> or <known_name attr="..."/>
+    const s4re = new RegExp(`<(${knownRe})\\s*(?:[^/]*)?/>`, 'i');
+    const s4 = responseText.match(s4re);
+    if (s4) {
+        return { name: s4[1].trim(), args: {} };
+    }
+
     return null;
 }
 
