@@ -22,32 +22,12 @@ export class VLLMModelBackend {
     private urlPath: string;   // nginx path segment  (may differ from model name!)
     private maxTokens: number;
 
-    constructor(roleName = "default") {
+    constructor(roleName = "default", taskComplexity: string = "Low", overrideModel?: string) {
         const config = vscode.workspace.getConfiguration("openaistudio");
         const rawBaseURL = config.get<string>("vllmUrl", "http://10.1.0.102:8050").trim();
         const apiKey     = config.get<string>("apiKey",  "EMPTY").trim();
 
         // ── Verified server inventory (2026-03-19) ──────────────────────────
-        //
-        //  nginx path   │ API model name  │ Max tokens │ Avg latency │ Use for
-        //  ─────────────┼─────────────────┼────────────┼─────────────┼──────────────────────
-        //  /mistral     │ mistral         │  4 096     │   0.296 s   │ CEO routing (JSON)
-        //  /qwen-code   │ qwen3-coder     │ 32 768     │   0.765 s   │ fast coding (Low)
-        //  /qwen        │ qwen            │ 16 384     │   0.961 s   │ general reasoning
-        //  /codestral   │ codestral       │ 32 768     │   1.969 s   │ heavy coding (High)
-        //  /gemma       │ gemma           │ 16 384     │   2.123 s   │ writer / CPO / docs
-        //  /bge-m3      │ bge-m3          │  8 192     │   0.022 s   │ embedding only
-        //
-        // ⚠️  qwen-code path ≠ qwen3-coder model name — kept separate below.
-        // ── Configurable overrides ───────────────────────────────────────────
-        const modelRouter    = config.get<string>("modelRouter",    "gemma").trim();
-        const modelCodeHeavy = config.get<string>("modelCodeHeavy", "codestral").trim();
-        // FIX: nginx routes by actual model name, not container name.
-        // Path is /qwen3-coder/v1, NOT /qwen-code/v1
-        const modelCodeLight = config.get<string>("modelCodeLight", "qwen3-coder").trim();
-        const modelGeneral   = config.get<string>("modelGeneral",   "gemma").trim();
-
-        // ── Context window sizes per model name ──────────────────────────────
         const PATH_CONTEXT: Record<string, number> = {
             "mistral":     4_096,
             "qwen3-coder": 32_768,
@@ -56,51 +36,57 @@ export class VLLMModelBackend {
             "gemma":       16_384,
         };
 
-        const roleLower = roleName.toLowerCase();
-        const isComplex = VLLMModelBackend.currentTaskComplexity === "High";
+        const modelAliases: Record<string, string> = {
+            "qwen-code": "qwen3-coder",
+            "qwen-coder": "qwen3-coder",
+            "qwen3-coder": "qwen3-coder",
+            "qwen": "qwen",
+            "codestral": "codestral",
+            "mistral": "mistral",
+            "gemma": "gemma"
+        };
 
-        // ── Role → path assignment ────────────────────────────────────────────
+        const modelRouter    = config.get<string>("modelRouter",    "mistral").trim();
+        const modelCodeHeavy = config.get<string>("modelCodeHeavy", "codestral").trim();
+        const modelCodeLight = config.get<string>("modelCodeLight", "qwen3-coder").trim();
+        const modelGeneral   = config.get<string>("modelGeneral",   "gemma").trim();
+
+        const roleLower = roleName.toLowerCase();
+        const isComplex = taskComplexity === "High" || VLLMModelBackend.currentTaskComplexity === "High";
+
         let chosenPath: string;
 
-        if (roleLower.includes("chief") || roleLower.includes("executive") || roleLower.includes("analyzer")) {
-            // Must return JSON fast — mistral wins at 0.296s
-            // maxTokens capped at 2048 (well under mistral's 4096 hard limit)
-            chosenPath = modelRouter;
-        } else if (
-            roleLower.includes("programmer") ||
-            roleLower.includes("technology") ||
-            roleLower.includes("cto")
-        ) {
-            // Complex: codestral (32k, most capable code model on server)
-            // Simple:  qwen-code/qwen3-coder (32k, 0.765s — fast enough)
-            chosenPath = isComplex ? modelCodeHeavy : modelCodeLight;
-        } else if (
-            roleLower.includes("reviewer") ||
-            roleLower.includes("qa")       ||
-            roleLower.includes("test")     ||
-            roleLower.includes("database") ||
-            roleLower.includes("security") ||
-            roleLower.includes("cyber")
-        ) {
-            // Same logic: heavy review → codestral, light review → qwen3-coder
-            chosenPath = isComplex ? modelCodeHeavy : modelCodeLight;
+        if (overrideModel) {
+            chosenPath = modelAliases[overrideModel.toLowerCase()] || overrideModel;
         } else {
-            // Technical Writer, CPO, general roles → gemma
-            chosenPath = modelGeneral;
+            if (roleLower.includes("chief") || roleLower.includes("executive") || roleLower.includes("analyzer")) {
+                chosenPath = modelRouter;
+            } else if (
+                roleLower.includes("programmer") ||
+                roleLower.includes("technology") ||
+                roleLower.includes("cto")
+            ) {
+                chosenPath = isComplex ? modelCodeHeavy : modelCodeLight;
+            } else if (
+                roleLower.includes("reviewer") ||
+                roleLower.includes("qa")       ||
+                roleLower.includes("test")     ||
+                roleLower.includes("database") ||
+                roleLower.includes("security") ||
+                roleLower.includes("cyber")
+            ) {
+                chosenPath = isComplex ? modelCodeHeavy : modelCodeLight;
+            } else {
+                chosenPath = modelGeneral;
+            }
         }
 
         this.urlPath   = chosenPath.trim();
-        this.model     = this.urlPath; // nginx path == model name on this server
+        this.model     = this.urlPath; 
         this.maxTokens = PATH_CONTEXT[this.urlPath] ?? 16_384;
-
-        // CEO hard cap: gemma has 16384 tokens — reserve 35% for output
-        if (this.urlPath === modelRouter) {
-            this.maxTokens = PATH_CONTEXT[this.urlPath] ?? 16_384;
-        }
 
         // ── Build final base URL ──────────────────────────────────────────────
         let base = rawBaseURL.replace(/\/+$/, "").replace(/\/v1$/, "");
-        // Avoid doubling the path if the URL already ends with the model path
         let finalBaseURL = base.toLowerCase().endsWith(this.urlPath.toLowerCase())
             ? `${base}/v1`
             : `${base}/${this.urlPath}/v1`;
@@ -111,7 +97,7 @@ export class VLLMModelBackend {
             `  nginx path : ${finalBaseURL}\n` +
             `  model (body): ${this.model}\n` +
             `  maxTokens  : ${this.maxTokens}\n` +
-            `  complexity : ${VLLMModelBackend.currentTaskComplexity}`
+            `  complexity : ${isComplex ? "High" : "Low"}`
         );
 
         this.openai = new OpenAI({ baseURL: finalBaseURL, apiKey });

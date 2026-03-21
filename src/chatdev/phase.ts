@@ -12,17 +12,22 @@ export class Phase {
     private userAgent: ChatAgent;
     private maxTurns: number;
 
+    private taskComplexity: string;
+
     constructor(
         phaseName: string,
         assistantRole: string,
         userRole: string,
         assistantPrompt: string,
         userPrompt: string,
-        maxTurns = 5
+        maxTurns = 5,
+        assistantModel?: string,
+        taskComplexity = "High"
     ) {
         this.phaseName = phaseName;
-        this.assistantAgent = new ChatAgent(assistantRole, RoleType.ASSISTANT, assistantPrompt);
-        this.userAgent = new ChatAgent(userRole, RoleType.USER, userPrompt);
+        this.taskComplexity = taskComplexity;
+        this.assistantAgent = new ChatAgent(assistantRole, RoleType.ASSISTANT, assistantPrompt, this.taskComplexity, assistantModel);
+        this.userAgent = new ChatAgent(userRole, RoleType.USER, userPrompt, this.taskComplexity);
         this.maxTurns = maxTurns;
     }
 
@@ -117,6 +122,7 @@ export class Phase {
                 ``,
                 `=== YOUR ROLE IN THIS PHASE: ${this.phaseName} ===`,
                 `Execute the task above. Write code and save files as requested.`,
+                `IMPORTANT: If the task specifies an absolute path (e.g., C:\\...), use it EXACTLY for all file operations.`,
                 taskIdx !== -1 ? `\n=== CONTEXT FROM PREVIOUS PHASES ===\n${taskPrompt.substring(0, taskIdx).trim()}` : '',
             ].filter(Boolean).join('\n');
             
@@ -137,7 +143,7 @@ export class Phase {
             ].filter(Boolean).join('\n');
             
             promptForUser = `I have completed the implementation for the task: "${originalTask}". ` +
-                           `Please review my code and provide feedback.`;
+                           `Please review the files at their saved locations and provide feedback.`;
         } else if (isDocPhase) {
             promptForAssistant = [
                 `=== ORIGINAL USER TASK ===`,
@@ -145,8 +151,10 @@ export class Phase {
                 `=== END OF TASK ===`,
                 ``,
                 `=== YOUR ROLE: ${this.assistantAgent.getRoleName()} (${this.phaseName}) ===`,
-                `Your task is to document the project. Do NOT write code. ` +
+                `Your task is to document the project. Do NOT write game code. ` +
+                `FORBIDDEN: You must NEVER call launch_file or execute_bash. Only use write_file for documentation.`,
                 `Create a README.md based on the features and files described in the context.`,
+                `IMPORTANT: If the project was saved to an absolute path, reflect this in the documentation.`,
                 taskIdx !== -1 ? `\n=== CONTEXT & SUMMARIES ===\n${taskPrompt.substring(0, taskIdx).trim()}` : '',
             ].filter(Boolean).join('\n');
             

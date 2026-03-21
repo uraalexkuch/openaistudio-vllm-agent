@@ -5,6 +5,7 @@ import { saveSkill } from "./skills";
 import { executeBashInWorkspace, verifyFile } from "../tools/execute_sandbox";
 import * as fs from 'fs';
 import * as path from 'path';
+import { resolveToolPath, getWorkspaceRoot } from "../utils/path_utils";
 
 export interface ToolCall {
     name: string;
@@ -74,26 +75,7 @@ export function parseToolCall(responseText: string): ToolCall | null {
 }
 
 
-// ── Workspace helpers ─────────────────────────────────────────────────────────
-
-function getWorkspaceRoot(): string {
-    return path.resolve(path.join(__dirname, '..', 'workspace'));
-}
-
-/**
- * Resolves a user-supplied filename to an absolute path.
- * If the filename is already absolute (e.g., C:\path\to\file or /path/to/file), it returns it as is.
- * Otherwise, it resolves it relative to the workspace directory.
- * NOTE: Absolute paths are now allowed as per user request to enable full disk interaction.
- */
-function resolveToolPath(filename: string): string {
-    if (path.isAbsolute(filename)) {
-        return filename;
-    }
-    const root       = getWorkspaceRoot();
-    const normalised = filename.replace(/\\/g, '/').replace(/^\/+/, '');
-    return path.resolve(root, normalised);
-}
+// ── Workspace helpers — now using src/utils/path_utils ───────────────────────
 
 export async function executeTool(toolCall: ToolCall): Promise<string> {
     switch (toolCall.name) {
@@ -152,16 +134,27 @@ export async function executeTool(toolCall: ToolCall): Promise<string> {
 
                 const entries: string[] = [];
                 const walk = (dir: string, prefix: string) => {
-                    for (const entry of fs.readdirSync(dir)) {
-                        const full = path.join(dir, entry);
-                        const rel  = prefix ? `${prefix}/${entry}` : entry;
-                        if (fs.statSync(full).isDirectory()) {
-                            entries.push(`📁 ${rel}/`);
-                            walk(full, rel);
-                        } else {
-                            const size = fs.statSync(full).size;
-                            entries.push(`📄 ${rel} (${(size / 1024).toFixed(1)} KB)`);
+                    try {
+                        const items = fs.readdirSync(dir);
+                        for (const entry of items) {
+                            const full = path.join(dir, entry);
+                            const rel  = prefix ? `${prefix}/${entry}` : entry;
+                            try {
+                                if (fs.statSync(full).isDirectory()) {
+                                    entries.push(`📁 ${rel}/`);
+                                    walk(full, rel);
+                                } else {
+                                    const size = fs.statSync(full).size;
+                                    entries.push(`📄 ${rel} (${(size / 1024).toFixed(1)} KB)`);
+                                }
+                            } catch (e: any) {
+                                // Skip individual files/folders we can't stat (EPERM etc)
+                                entries.push(`⚠️ ${rel} (виняток: ${e.code || 'error'})`);
+                            }
                         }
+                    } catch (e: any) {
+                        // Skip entire directory if readdir fails
+                        entries.push(`⚠️ ${prefix || dir} (немає доступу: ${e.code || 'error'})`);
                     }
                 };
                 walk(dirPath, '');

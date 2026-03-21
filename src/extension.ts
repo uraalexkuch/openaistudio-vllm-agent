@@ -13,7 +13,14 @@ import { VLLMModelBackend } from './camel/model_backend';
 let globalSessionContext = "";
 let isExecuting = false;
 
-type RoleConfig = Record<string, string>;
+interface RoleDetail {
+    model?: string;
+    description?: string;
+    skills?: string[];
+    systemPrompt: string;
+}
+
+type RoleConfig = Record<string, string | RoleDetail> & { roles?: Record<string, RoleDetail> };
 
 const FALLBACK_PIPELINE: Array<{
     phaseName: string;
@@ -22,21 +29,25 @@ const FALLBACK_PIPELINE: Array<{
     maxTurns: number;
     dependsOn: string[];
 }> = [
-    { phaseName: "System Architecture", assistantRole: "Chief Technology Officer",  userRole: "Chief Product Officer",    maxTurns: 2, dependsOn: [] },
-    { phaseName: "Coding",              assistantRole: "Programmer",                userRole: "Chief Technology Officer", maxTurns: 2, dependsOn: ["System Architecture"] },
-    { phaseName: "CodeReview",          assistantRole: "Code Reviewer",             userRole: "Programmer",               maxTurns: 4, dependsOn: ["Coding"] },
-    { phaseName: "Documentation",       assistantRole: "Technical Writer",          userRole: "Chief Product Officer",    maxTurns: 2, dependsOn: ["CodeReview"] },
+    { phaseName: "Business Analysis",    assistantRole: "Chief Executive Officer",       userRole: "Chief Product Officer",    maxTurns: 2, dependsOn: [] },
+    { phaseName: "System Architecture",  assistantRole: "Chief Technology Officer",      userRole: "Chief Executive Officer",  maxTurns: 2, dependsOn: ["Business Analysis"] },
+    { phaseName: "Database Optimization",assistantRole: "Database Optimization Expert", userRole: "Chief Technology Officer", maxTurns: 2, dependsOn: ["System Architecture"] },
+    { phaseName: "Cyber Security Audit", assistantRole: "Cyber Security Specialist",    userRole: "Chief Technology Officer", maxTurns: 2, dependsOn: ["Database Optimization"] },
+    { phaseName: "Implementation",       assistantRole: "Programmer",                    userRole: "Chief Technology Officer", maxTurns: 2, dependsOn: ["Cyber Security Audit"] },
+    { phaseName: "Quality Assurance",    assistantRole: "Software Test Engineer",        userRole: "Programmer",               maxTurns: 2, dependsOn: ["Implementation"] },
+    { phaseName: "Code Review",          assistantRole: "Code Reviewer",                 userRole: "Programmer",               maxTurns: 4, dependsOn: ["Quality Assurance"] },
+    { phaseName: "Project Documentation",assistantRole: "Technical Writer",              userRole: "Chief Executive Officer",  maxTurns: 2, dependsOn: ["Code Review"] },
 ];
 
 const DEFAULT_USER_ROLE: Record<string, string> = {
-    "Programmer":                   "Chief Technology Officer",
-    "Frontend Developer":           "Chief Technology Officer",
-    "Backend Developer":            "Chief Technology Officer",
-    "Chief Technology Officer":     "Chief Product Officer",
-    "Code Reviewer":                "Programmer",
-    "Technical Writer":             "Chief Product Officer",
+    "Chief Executive Officer":      "Chief Product Officer",
+    "Chief Technology Officer":     "Chief Executive Officer",
     "Database Optimization Expert": "Chief Technology Officer",
     "Cyber Security Specialist":    "Chief Technology Officer",
+    "Programmer":                   "Chief Technology Officer",
+    "Software Test Engineer":       "Programmer",
+    "Code Reviewer":                "Programmer",
+    "Technical Writer":             "Chief Executive Officer",
 };
 
 const DEFAULT_MAX_TURNS: Record<string, number> = {
@@ -137,16 +148,45 @@ async function syncSkills(context: vscode.ExtensionContext): Promise<void> {
 }
 
 function loadRoleConfig(extensionPath: string): RoleConfig {
-    const configPath = path.join(extensionPath, 'src', 'config', 'RoleConfig.json');
-    if (!fs.existsSync(configPath)) { console.warn('RoleConfig.json not found at', configPath); return {}; }
-    try {
-        const parsed = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as RoleConfig;
-        return {};
-    } catch (e) {
-        vscode.window.showWarningMessage(`RoleConfig.json parse error: ${e}`);
-        return {};
+    // Priority: Project root RoleConfig.json, then src/config/RoleConfig.json
+    const paths = [
+        path.join(extensionPath, 'RoleConfig.json'),
+        path.join(extensionPath, 'src', 'config', 'RoleConfig.json')
+    ];
+
+    for (const configPath of paths) {
+        if (fs.existsSync(configPath)) {
+            try {
+                const parsed = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+                if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                    console.log(`OpenAIStudio: Loaded RoleConfig from ${configPath}`);
+                    return parsed;
+                }
+            } catch (e) {
+                console.warn(`Error parsing ${configPath}:`, e);
+            }
+        }
     }
+    return {};
+}
+
+/**
+ * Normalizes RoleConfig to extract systemPrompt and optional model for a given role.
+ */
+function getRoleDetail(config: RoleConfig, roleName: string): { prompt: string, model?: string } {
+    // 1. Check if "roles" field exists (new structure)
+    if (config.roles && config.roles[roleName]) {
+        const detail = config.roles[roleName];
+        return { prompt: detail.systemPrompt, model: detail.model };
+    }
+    // 2. Check if the role is a direct key
+    const val = (config as any)[roleName];
+    if (val) {
+        if (typeof val === 'string') return { prompt: val };
+        return { prompt: val.systemPrompt, model: val.model };
+    }
+    // 3. Fallback
+    return { prompt: `You are the ${roleName}. Append <DONE> when finished.` };
 }
 
 async function executeProject(idea: string, context: vscode.ExtensionContext) {
@@ -189,44 +229,14 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
     // FIX: roles in quotes so model copies them exactly; stronger enforcement
     const availableRoles = Object.keys(roleConfig).map(r => `"${r}"`).join(', ');
 
-    const ceoSystemPrompt = `You are a senior software architect. Analyze the task and return a JSON execution plan.
-Return ONLY valid JSON — no markdown, no explanation, no text before or after the JSON.
-
-ALLOWED ROLES (use EXACTLY these strings, nothing else):
-${availableRoles}
-
-Response format:
-{"complexity":"Low"|"High","phases":[{"name":"<unique name>","role":"<EXACT role from list above>","dependsOn":[]}]}
-
-CRITICAL RULES:
-- "role" MUST be copied EXACTLY from the allowed roles list — no variations.
-- "name" must be unique.
-- "dependsOn" lists names of phases that must finish first.
-
-SINGLE FILE / SIMPLE TASK RULE:
-If the task is a simple game, script, or single-file app (Low complexity), use EXACTLY this 3-phase SEQUENTIAL plan:
-1. "Coding" [Programmer], dependsOn: []
-2. "Code Review" [Code Reviewer], dependsOn: ["Coding"]
-3. "Documentation" [Technical Writer], dependsOn: ["Code Review"]
-Do NOT add Architecture or other phases for simple tasks.
-
-COMPLEX TASKS:
-Split into logical parts (e.g., Backend, Frontend) only if they can truly be built independently.
-Always ensure Documentation depends on the LAST review phase.
-
-FORBIDDEN — never create phases with these names (launching is done INSIDE Coding phase):
-"Demonstration", "Demo", "Testing & Demonstration", "Test & Demo", "Launch", "Run", "Execute"
-
-Parallel phases are ONLY for genuinely independent deliverables (e.g. separate frontend + backend servers).
-
-Example fullstack (two separate servers):
-{"complexity":"High","phases":[
-  {"name":"System Architecture","role":"Chief Technology Officer","dependsOn":[]},
-  {"name":"Frontend","role":"Frontend Developer","dependsOn":["System Architecture"]},
-  {"name":"Backend","role":"Backend Developer","dependsOn":["System Architecture"]},
-  {"name":"Integration Review","role":"Code Reviewer","dependsOn":["Frontend","Backend"]},
-  {"name":"Documentation","role":"Technical Writer","dependsOn":["Integration Review"]}
-]}`;
+    const ceoSystemPrompt = `Your goal is to complete the task: ${idea}\n` +
+                "You have access to specialized roles specified in RoleConfig.json.\n" +
+                "HEAVY PROJECTS (Complex logic, files, DB, Security): Use 8 roles sequentially: " +
+                "Chief Executive Officer -> Chief Technology Officer -> Database Optimization Expert -> Cyber Security Specialist -> Programmer -> Software Test Engineer -> Code Reviewer -> Technical Writer.\n" +
+                "LIGHT PROJECTS (Single scripts, simple UI): Use 3 roles: Programmer -> Code Reviewer -> Technical Writer.\n" +
+                "Return ONLY valid JSON including 'complexity' ('Low' or 'High') and 'plan' (an array of phases).\n" +
+                "Each phase MUST have 'phaseName', 'assistantRole', 'userRole', 'maxTurns', and 'dependsOn'.\n" +
+                "IMPORTANT: Respond ONLY with a valid JSON object.";
 
     let contextForCEO = globalSessionContext;
     if (contextForCEO.length > 2000) contextForCEO = contextForCEO.substring(contextForCEO.length - 2000);
@@ -290,25 +300,51 @@ Example fullstack (two separate servers):
     }
 
     // ── Build phases ──────────────────────────────────────────────────────────
+    let plan: Array<{
+        phaseName: string;
+        assistantRole: string;
+        userRole: string;
+        maxTurns: number;
+        dependsOn: string[];
+    }> = [];
+
     if (dagPhases.length === 0) {
-        for (const step of FALLBACK_PIPELINE) {
-            const assistantPrompt = roleConfig[step.assistantRole] || `You are ${step.assistantRole}.`;
-            const userPrompt      = roleConfig[step.userRole]      || `You are ${step.userRole}.`;
+        const isSimpleTask = idea.length < 150 &&
+                            !idea.toLowerCase().includes('database') &&
+                            !idea.toLowerCase().includes('security') &&
+                            !idea.toLowerCase().includes('api') &&
+                            !idea.toLowerCase().includes('architecture');
+
+        plan = isSimpleTask ? [
+            { phaseName: "Implementation",       assistantRole: "Programmer",       userRole: "Chief Technology Officer", maxTurns: 2, dependsOn: [] },
+            { phaseName: "Code Review",          assistantRole: "Code Reviewer",    userRole: "Programmer",               maxTurns: 4, dependsOn: ["Implementation"] },
+            { phaseName: "Project Documentation",assistantRole: "Technical Writer", userRole: "Chief Executive Officer",  maxTurns: 2, dependsOn: ["Code Review"] },
+        ] : FALLBACK_PIPELINE;
+
+        for (const step of plan) {
+            const assistantDetail = getRoleDetail(roleConfig, step.assistantRole);
+            const userDetail      = getRoleDetail(roleConfig, step.userRole);
             chatChain.addPhase(
-                new Phase(step.phaseName, step.assistantRole, step.userRole, assistantPrompt, userPrompt, step.maxTurns),
+                new Phase(step.phaseName, step.assistantRole, step.userRole, assistantDetail.prompt, userDetail.prompt, step.maxTurns, assistantDetail.model),
                 step.dependsOn
             );
         }
     } else {
-        for (const dp of dagPhases) {
-            const assistantRole   = dp.role;
-            const userRole        = DEFAULT_USER_ROLE[assistantRole] ?? "Chief Product Officer";
-            const assistantPrompt = roleConfig[assistantRole] || `You are ${assistantRole}.`;
-            const userPrompt      = roleConfig[userRole]      || `You are ${userRole}.`;
-            chatChain.addPhase(
-                new Phase(dp.name, assistantRole, userRole, assistantPrompt, userPrompt, maxTurnsFor(assistantRole)),
-                dp.dependsOn
+        for (const p of dagPhases) {
+            const assistantDetail = getRoleDetail(roleConfig, p.role); // Use p.role for assistant
+            const userRole        = DEFAULT_USER_ROLE[p.role] ?? "Chief Product Officer"; // Determine user role based on assistant
+            const userDetail      = getRoleDetail(roleConfig, userRole);
+
+            const phase = new Phase(
+                p.name, // Use p.name for phaseName
+                p.role, // Use p.role for assistantRole
+                userRole,
+                assistantDetail.prompt,
+                userDetail.prompt,
+                maxTurnsFor(p.role), // Use p.role for maxTurns
+                assistantDetail.model // New: Pass model from config
             );
+            chatChain.addPhase(phase, p.dependsOn);
         }
     }
 

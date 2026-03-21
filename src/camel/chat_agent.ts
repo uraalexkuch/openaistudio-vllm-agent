@@ -10,12 +10,12 @@ export class ChatAgent {
     private backend: VLLMModelBackend;
     public onEvent?: (ev: any) => void;
 
-    constructor(roleName: string, roleType: RoleType, systemMessageContent: string) {
+    constructor(roleName: string, roleType: RoleType, systemMessageContent: string, taskComplexity: string = "Low", modelName?: string) {
         this.roleName = roleName;
         this.roleType = roleType;
         this.systemMessage = { role: "system", content: systemMessageContent };
         this.memory = [this.systemMessage];
-        this.backend = new VLLMModelBackend(this.roleName);
+        this.backend = new VLLMModelBackend(this.roleName, taskComplexity, modelName);
     }
 
     addSystemContext(context: string) {

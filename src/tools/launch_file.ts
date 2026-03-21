@@ -1,15 +1,15 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import { resolveToolPath } from "../utils/path_utils";
 
 /**
- * Opens a file from the workspace in the default system application.
+ * Opens a file from the workspace or absolute path in the default system application.
  * For HTML files this opens the browser; for code files opens in VS Code editor.
  */
 export async function launch_file(filename: string): Promise<string> {
     try {
-        const workspaceFolder = path.join(__dirname, '..', 'workspace');
-        const filePath = path.join(workspaceFolder, filename);
+        const filePath = resolveToolPath(filename);
 
         if (!fs.existsSync(filePath)) {
             return `Error: File "${filename}" not found in workspace. Make sure to write_file first.`;
