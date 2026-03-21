@@ -96,7 +96,7 @@ export class VLLMModelBackend {
         }
 
         this.urlPath   = chosenPath.trim();
-        this.model     = PATH_TO_MODEL[this.urlPath] ?? this.urlPath; // resolve model id
+        this.model     = PATH_TO_MODEL[this.urlPath] ?? this.urlPath; // resolve model id for API body
         this.maxTokens = PATH_CONTEXT[this.urlPath]  ?? 16_384;
 
         // CEO hard cap: leave room for output within mistral's 4096 total
@@ -113,10 +113,11 @@ export class VLLMModelBackend {
         finalBaseURL = finalBaseURL.replace(/([^:]\/)\/+/g, "$1");
 
         console.log(
-            `VLLMModelBackend [${roleName}]: ` +
-            `path=/${this.urlPath}  model=${this.model}  ` +
-            `maxTokens=${this.maxTokens}  complexity=${VLLMModelBackend.currentTaskComplexity}\n` +
-            `  → ${finalBaseURL}`
+            `VLLMModelBackend [${roleName}]:\n` +
+            `  nginx path : ${finalBaseURL}\n` +
+            `  model (body): ${this.model}\n` +
+            `  maxTokens  : ${this.maxTokens}\n` +
+            `  complexity : ${VLLMModelBackend.currentTaskComplexity}`
         );
 
         this.openai = new OpenAI({ baseURL: finalBaseURL, apiKey });
@@ -235,9 +236,42 @@ export class VLLMModelBackend {
                 return response.choices[0].message?.content || "";
             }
 
-        } catch (error) {
-            console.error(`Error communicating with vLLM API (Model: ${this.model}):`, error);
-            vscode.window.showErrorMessage(`vLLM Error (${this.model}): ${error}`);
+        } catch (error: any) {
+            const errStr = String(error);
+            // If 404 with the resolved model name, retry using the URL path itself as model id.
+            // Some vLLM nginx proxies expect model == path segment, not the underlying model name.
+            if (errStr.includes("404") && this.model !== this.urlPath) {
+                console.warn(
+                    `VLLMModelBackend: 404 with model="${this.model}". ` +
+                    `Retrying with model="${this.urlPath}" (url-path fallback)...`
+                );
+                const retryBody = {
+                    model: this.urlPath,
+                    messages: processedMessages,
+                    temperature,
+                    max_tokens: requestedOutputTokens,
+                };
+                try {
+                    if (onToken) {
+                        const stream = await this.openai.chat.completions.create({ ...retryBody, stream: true });
+                        let fullText = "";
+                        for await (const chunk of stream) {
+                            const token = chunk.choices[0]?.delta?.content || "";
+                            fullText += token;
+                            onToken(token);
+                        }
+                        return fullText;
+                    } else {
+                        const response = await this.openai.chat.completions.create(retryBody);
+                        return response.choices[0].message?.content || "";
+                    }
+                } catch (retryError) {
+                    console.error(`VLLMModelBackend: Retry also failed:`, retryError);
+                    // Fall through to the original error below
+                }
+            }
+            console.error(`Error communicating with vLLM (path=/${this.urlPath} model=${this.model}):`, error);
+            vscode.window.showErrorMessage(`vLLM Error [/${this.urlPath} → ${this.model}]: ${error}`);
             throw error;
         }
     }
