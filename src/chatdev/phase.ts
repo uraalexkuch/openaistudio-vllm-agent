@@ -73,12 +73,17 @@ export class Phase {
             `LANGUAGE RULE: Your feedback and questions MUST be in Ukrainian (uk-UA).`
         );
 
-        // FIX 3: <DONE> instruction injected LAST so it is the most recent context.
+        // Wire onEvent so tool_call / tool_result events reach the UI
+        this.assistantAgent.onEvent = (ev) => this.onEvent?.(ev);
+        this.userAgent.onEvent      = (ev) => this.onEvent?.(ev);
+
+        // FIX 3: <DONE> instruction — explicit: after saving AND launching, output <DONE>
         this.assistantAgent.addSystemContext(
-            `When you have fully completed your part of the task, append exactly <DONE> at the end of your response.`
+            `When you have fully completed your task (including saving files with write_file ` +
+            `AND launching with launch_file if requested), append exactly <DONE> at the very end.`
         );
         this.userAgent.addSystemContext(
-            `When you have reviewed the result and have no more corrections or questions, append exactly <DONE> at the end of your response.`
+            `When you have reviewed the result and have no more corrections, append exactly <DONE> at the very end.`
         );
 
         // Extract the original user task from the context block.

@@ -351,6 +351,47 @@ export function activate(context: vscode.ExtensionContext) {
             isExecuting = false;
             ChatWebview.currentPanel?.dispose();
         }));
+
+        // Open a specific file from workspace in the default browser
+        context.subscriptions.push(vscode.commands.registerCommand('openaistudio.openFileInBrowser', async (filename?: string) => {
+            const workspaceFolder = path.join(context.extensionPath, 'workspace');
+            let targetFile = filename;
+
+            if (!targetFile) {
+                // Let user pick from workspace files
+                if (!fs.existsSync(workspaceFolder)) {
+                    vscode.window.showWarningMessage('Workspace folder is empty. Run a task first.');
+                    return;
+                }
+                const files = fs.readdirSync(workspaceFolder).filter(f => f.endsWith('.html') || f.endsWith('.htm'));
+                if (files.length === 0) {
+                    vscode.window.showWarningMessage('No HTML files found in workspace.');
+                    return;
+                }
+                targetFile = files.length === 1 ? files[0] : await vscode.window.showQuickPick(files, {
+                    title: 'Оберіть файл для відкриття в браузері'
+                }) ?? undefined;
+            }
+
+            if (!targetFile) return;
+
+            const filePath = path.join(workspaceFolder, targetFile);
+            if (!fs.existsSync(filePath)) {
+                vscode.window.showErrorMessage(`File not found: ${filePath}`);
+                return;
+            }
+            const opened = await vscode.env.openExternal(vscode.Uri.file(filePath));
+            if (!opened) {
+                vscode.window.showTextDocument(vscode.Uri.file(filePath));
+            }
+        }));
+
+        // Open workspace folder in Explorer
+        context.subscriptions.push(vscode.commands.registerCommand('openaistudio.openWorkspace', () => {
+            const workspaceFolder = path.join(context.extensionPath, 'workspace');
+            if (!fs.existsSync(workspaceFolder)) fs.mkdirSync(workspaceFolder, { recursive: true });
+            vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(workspaceFolder));
+        }));
         context.subscriptions.push(vscode.commands.registerCommand('openaistudio.syncSkills', async () => {
             await syncSkills(context);
         }));

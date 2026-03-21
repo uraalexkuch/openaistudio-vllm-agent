@@ -36,6 +36,14 @@
         "title": "OpenAIStudio: Зупинити агента"
       },
       {
+        "command": "openaistudio.openFileInBrowser",
+        "title": "OpenAIStudio: Відкрити файл у браузері"
+      },
+      {
+        "command": "openaistudio.openWorkspace",
+        "title": "OpenAIStudio: Відкрити папку workspace"
+      },
+      {
         "command": "openaistudio.selectModel",
         "title": "OpenAIStudio: Обрати модель vLLM"
       },
@@ -163,5 +171,8 @@
   "dependencies": {
     "axios": "^1.13.6",
     "openai": "^4.104.0"
+  },
+  "_notes": {
+    "execute_bash": "Uses built-in child_process.spawn — no extra npm dep needed. Requires Docker Desktop installed on host."
   }
 }

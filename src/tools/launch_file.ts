@@ -8,7 +8,7 @@ import * as fs from 'fs';
  */
 export async function launch_file(filename: string): Promise<string> {
     try {
-        const workspaceFolder = path.join(__dirname, '..', '..', 'workspace');
+        const workspaceFolder = path.join(__dirname, '..', 'workspace');
         const filePath = path.join(workspaceFolder, filename);
 
         if (!fs.existsSync(filePath)) {
