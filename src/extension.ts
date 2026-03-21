@@ -13,12 +13,10 @@ import { VLLMModelBackend } from './camel/model_backend';
 let globalSessionContext = "";
 let isExecuting = false;
 
-interface RoleEntry {
-    model?: string;
-    description?: string;
-    skills?: string[];
-    systemPrompt?: string;
-}
+// FIX: RoleConfig.json is a flat map of roleName → systemPrompt string.
+// Previously the code did JSON.parse(raw).roles which always returned undefined
+// because the file has no "roles" wrapper key — so every agent got a generic fallback.
+type RoleConfig = Record<string, string>;
 
 // Ordered pipeline — roles must exist in RoleConfig.json
 const PIPELINE: Array<{
@@ -41,7 +39,6 @@ async function runSetupWizard(config: vscode.WorkspaceConfiguration): Promise<bo
     const missingFields: string[] = [];
     if (!config.get<string>('vllmUrl'))      missingFields.push('vllmUrl');
     if (!config.get<string>('model'))        missingFields.push('model');
-    // perplexicaUrl remains optional
     if (!config.get<string>('skillsPath'))   missingFields.push('skillsPath (навички)');
 
     if (missingFields.length === 0) return true;
@@ -54,7 +51,6 @@ async function runSetupWizard(config: vscode.WorkspaceConfiguration): Promise<bo
 
     if (setup !== 'Налаштувати') return true;
 
-    // Step 1: vLLM URL
     if (!config.get<string>('vllmUrl')) {
         const vllmUrl = await vscode.window.showInputBox({
             title: '🔌 Крок 1/4 — vLLM Server URL',
@@ -67,7 +63,6 @@ async function runSetupWizard(config: vscode.WorkspaceConfiguration): Promise<bo
         }
     }
 
-    // Step 2: Default model name
     if (!config.get<string>('model')) {
         const model = await vscode.window.showInputBox({
             title: '🤖 Крок 2/4 — Назва моделі за замовчуванням',
@@ -80,7 +75,6 @@ async function runSetupWizard(config: vscode.WorkspaceConfiguration): Promise<bo
         }
     }
 
-    // Step 3: Perplexica URL
     if (!config.get<string>('perplexicaUrl')) {
         const perplexicaUrl = await vscode.window.showInputBox({
             title: '🔍 Крок 3/4 — Perplexica URL (веб-пошук)',
@@ -93,7 +87,6 @@ async function runSetupWizard(config: vscode.WorkspaceConfiguration): Promise<bo
         }
     }
 
-    // Step 4: Skills path — with folder picker
     if (!config.get<string>('skillsPath')) {
         const pickFolder = await vscode.window.showInformationMessage(
             '📚 Крок 4/4 — Оберіть директорію з навичками',
@@ -170,6 +163,30 @@ async function syncSkills(context: vscode.ExtensionContext): Promise<void> {
     });
 }
 
+/** Loads and returns the role config map (flat: roleName → systemPrompt). */
+function loadRoleConfig(extensionPath: string): RoleConfig {
+    const configPath = path.join(extensionPath, 'src', 'config', 'RoleConfig.json');
+    if (!fs.existsSync(configPath)) {
+        console.warn('RoleConfig.json not found at', configPath);
+        return {};
+    }
+    try {
+        const raw = fs.readFileSync(configPath, 'utf8');
+        // FIX: RoleConfig.json is a plain { "RoleName": "system prompt", ... } object.
+        // The old code did JSON.parse(raw).roles which always returned undefined
+        // because there is no "roles" wrapper key in the file.
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            return parsed as RoleConfig;
+        }
+        console.warn('RoleConfig.json has unexpected shape:', typeof parsed);
+        return {};
+    } catch (e) {
+        vscode.window.showWarningMessage(`RoleConfig.json parse error: ${e}`);
+        return {};
+    }
+}
+
 /** Executes the full project pipeline with a given idea */
 async function executeProject(idea: string, context: vscode.ExtensionContext) {
     if (isExecuting) {
@@ -187,19 +204,8 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
         return;
     }
 
-        // Load role configuration from RoleConfig.json
-        const configPath = path.join(context.extensionPath, 'src', 'config', 'RoleConfig.json');
-    let roleConfig: Record<string, RoleEntry> = {};
-    if (fs.existsSync(configPath)) {
-        try {
-            const raw = fs.readFileSync(configPath, 'utf8');
-            roleConfig = JSON.parse(raw).roles || {};
-        } catch (e) {
-            vscode.window.showWarningMessage(`RoleConfig.json parse error: ${e}`);
-        }
-    }
+    const roleConfig = loadRoleConfig(context.extensionPath);
 
-    // Open the Chat UI
     ChatWebview.createOrShow(context.extensionUri);
     ChatWebview.currentPanel?.notifyStart();
 
@@ -212,17 +218,15 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
     }
     ChatWebview.currentPanel?.broadcastEvent({ type: 'narration', content: `🔌 vLLM: ${vllmUrl}` });
 
-    // Initialize engine
     const chatChain = new ChatChain();
     chatChain.onEvent = (ev) => ChatWebview.currentPanel?.broadcastEvent(ev);
 
     ChatWebview.currentPanel?.broadcastEvent({ type: 'narration', content: `🔍 Аналізую необхідні етапи для завдання...` });
-    
-    let requiredPhases = ["System Architecture", "Coding", "Documentation"]; // Sensible default
+
+    let requiredPhases = ["System Architecture", "Coding", "Documentation"];
     try {
         const analyzer = new VLLMModelBackend("Chief Executive Officer");
-        
-        // Truncate context for CEO to stay within 4k limit of Mistral
+
         let contextForCEO = globalSessionContext;
         if (contextForCEO.length > 2000) {
             contextForCEO = contextForCEO.substring(contextForCEO.length - 2000);
@@ -246,16 +250,15 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
         const response = await analyzer.step([
             { role: "user", content: `Ти досвідчений системний архітектор. Повертай ТІЛЬКИ валідний JSON.\n\n${analysisPrompt}` }
         ]);
-        
+
         let cleanedResponse = response.trim();
-        // Remove markdown code blocks if present
         if (cleanedResponse.includes("```")) {
             const match = cleanedResponse.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
             if (match && match[1]) {
                 cleanedResponse = match[1];
             }
         }
-        
+
         try {
             const parsed = JSON.parse(cleanedResponse);
             if (parsed && typeof parsed === 'object') {
@@ -277,21 +280,18 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
     }
 
     const normalizedRequired = requiredPhases.map(p => p.toLowerCase().trim());
-    const actualPipeline = PIPELINE.filter(step => {
-        return normalizedRequired.includes(step.phaseName.toLowerCase().trim());
-    });
-    
+    const actualPipeline = PIPELINE.filter(step =>
+        normalizedRequired.includes(step.phaseName.toLowerCase().trim())
+    );
+
     if (actualPipeline.length === 0) {
         actualPipeline.push(...PIPELINE);
     }
 
-    // Build phases
     for (const step of actualPipeline) {
-        const assistantConfig = roleConfig[step.assistantRole] || {};
-        const userConfig = roleConfig[step.userRole] || {};
-
-        const assistantPrompt = assistantConfig.systemPrompt || `Ти є ${step.assistantRole}.`;
-        const userPrompt = userConfig.systemPrompt || `Ти є ${step.userRole}.`;
+        // FIX: RoleConfig values are plain strings (system prompts), not objects with .systemPrompt
+        const assistantPrompt = roleConfig[step.assistantRole] || `Ти є ${step.assistantRole}.`;
+        const userPrompt      = roleConfig[step.userRole]      || `Ти є ${step.userRole}.`;
 
         chatChain.addPhase(new Phase(
             step.phaseName,
@@ -305,7 +305,7 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
 
     try {
         const env = await chatChain.execute(fullExecutionPrompt);
-        
+
         globalSessionContext += `\n[Користувач]: ${idea}\n`;
         const phaseKeys = Object.keys(env);
         if (phaseKeys.length > 0) {
@@ -316,7 +316,7 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
             }
             globalSessionContext += `[Результат (${lastPhase})]:\n${output}\n---\n`;
         }
-        
+
         ChatWebview.currentPanel?.broadcastEvent({ type: 'narration', content: "✅ Процес завершено." });
         ChatWebview.currentPanel?.broadcastEvent({ type: 'done' });
     } catch (e: any) {
@@ -331,26 +331,20 @@ export function activate(context: vscode.ExtensionContext) {
         console.log('OpenAIStudio_vLLM_Agent: Attempting to activate...');
         vscode.window.showInformationMessage('OpenAIStudio: Активація розширення...');
 
-        console.log('OpenAIStudio_vLLM_Agent: Registering commands...');
-
-        // 1. Settings Command
         context.subscriptions.push(vscode.commands.registerCommand('openaistudio.openSettings', async () => {
             await runSetupWizard(vscode.workspace.getConfiguration('openaistudio'));
         }));
 
-        // 2. Open Agent Command
         context.subscriptions.push(vscode.commands.registerCommand('openaistudio.openAgent', () => {
             ChatWebview.createOrShow(context.extensionUri);
         }));
 
-        // 3. New Task Command (from Command Palette)
         context.subscriptions.push(vscode.commands.registerCommand('openaistudio.newTask', async () => {
             globalSessionContext = "";
             vscode.window.showInformationMessage('OpenAIStudio: Почато нове завдання (контекст очищено).');
             ChatWebview.createOrShow(context.extensionUri);
         }));
 
-        // 3b. Task execution from webview
         context.subscriptions.push(vscode.commands.registerCommand('openaistudio.startTaskFromWebview', async (idea: string) => {
             if (idea) {
                 console.log(`openaistudio.startTaskFromWebview: Starting project with idea: ${idea}`);
@@ -358,18 +352,15 @@ export function activate(context: vscode.ExtensionContext) {
             }
         }));
 
-        // 4. Stop Agents
         context.subscriptions.push(vscode.commands.registerCommand('openaistudio.stopAgent', () => {
             isExecuting = false;
             ChatWebview.currentPanel?.dispose();
         }));
 
-        // 4. Sync Skills
         context.subscriptions.push(vscode.commands.registerCommand('openaistudio.syncSkills', async () => {
             await syncSkills(context);
         }));
 
-        // 5. Select Model
         context.subscriptions.push(vscode.commands.registerCommand('openaistudio.selectModel', async () => {
             const config = vscode.workspace.getConfiguration('openaistudio');
             const vllmUrl = config.get<string>('vllmUrl', '');
@@ -391,23 +382,20 @@ export function activate(context: vscode.ExtensionContext) {
             }
         }));
 
-        // Selection commands
         const editorCommands = [
-            { id: 'openaistudio.explainFile', prompt: 'Поясни структуру та логіку цього файлу:' },
-            { id: 'openaistudio.fixSelection', prompt: 'Знайди та виправ помилки у виділеному коді:' },
-            { id: 'openaistudio.refactor', prompt: 'Зроби рефакторинг виділеного коду (Clean Code):' },
-            { id: 'openaistudio.writeTests', prompt: 'Напиши Unit-тести для виділеного коду:' },
-            { id: 'openaistudio.implement', prompt: 'Реалізуй функціонал на основі коментарів у виділеному коді:' }
+            { id: 'openaistudio.explainFile',   prompt: 'Поясни структуру та логіку цього файлу:' },
+            { id: 'openaistudio.fixSelection',  prompt: 'Знайди та виправ помилки у виділеному коді:' },
+            { id: 'openaistudio.refactor',      prompt: 'Зроби рефакторинг виділеного коду (Clean Code):' },
+            { id: 'openaistudio.writeTests',    prompt: 'Напиши Unit-тести для виділеного коду:' },
+            { id: 'openaistudio.implement',     prompt: 'Реалізуй функціонал на основі коментарів у виділеному коді:' }
         ];
 
         for (const cmd of editorCommands) {
             context.subscriptions.push(vscode.commands.registerCommand(cmd.id, async () => {
-                // WorkspaceManager ініціалізується ТІЛЬКИ при виклику команди
                 const ws = new WorkspaceManager(context);
                 const editorContext = ws.gatherContext();
                 const fileContent = ws.getActiveFileContent();
                 const fullPrompt = `${cmd.prompt}\n\nКод/Файл:\n${fileContent}\n\nКонтекст проєкта:\n${editorContext}`;
-
                 await executeProject(fullPrompt, context);
             }));
         }

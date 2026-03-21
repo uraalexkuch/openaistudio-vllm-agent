@@ -16,7 +16,18 @@ export interface ChatMessage {
 }
 
 export interface AgentEvent {
-    type: 'step' | 'thinking' | 'tool_call' | 'tool_result' | 'answer' | 'error' | 'done' | 'narration';
+    type:
+        | 'step'
+        | 'thinking'
+        | 'tool_call'
+        | 'tool_result'
+        | 'answer'
+        | 'answer_stream_start'   // FIX: was missing — used in phase.ts
+        | 'answer_stream_chunk'   // FIX: was missing from union (implied but not declared)
+        | 'answer_stream_end'     // FIX: was missing — used in phase.ts
+        | 'error'
+        | 'done'
+        | 'narration';
     content?: string;
     role?: string;
     model?: string;
@@ -26,4 +37,3 @@ export interface AgentEvent {
     step?: number;
     totalSteps?: number;
 }
-
