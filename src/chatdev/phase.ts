@@ -38,6 +38,9 @@ export class Phase {
             this.assistantAgent.addSystemContext(skillsText);
         }
 
+        this.assistantAgent.addSystemContext("Коли ти повністю виконав свою частину завдання або відповів на питання, обов'язково додай в кінці своєї відповіді слово <DONE>.");
+        this.userAgent.addSystemContext("Коли ти перевірив результат і більше не маєш правок або зауважень, обов'язково додай в кінці своєї відповіді слово <DONE>.");
+
         let currentMessage = taskPrompt;
 
         let finalCodeOrResult = "";
@@ -89,6 +92,10 @@ export class Phase {
                 model: userModel,
                 content: currentMessage 
             });
+
+            if (this.checkTermination(currentMessage)) {
+                break;
+            }
         }
 
         
