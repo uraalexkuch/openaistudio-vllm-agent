@@ -28,7 +28,14 @@ const PIPELINE: Array<{
     { phaseName: "System Architecture",   assistantRole: "Chief Technology Officer",     userRole: "Chief Executive Officer",  maxTurns: 2 },
     { phaseName: "Database Optimization", assistantRole: "Database Optimization Expert", userRole: "Chief Technology Officer", maxTurns: 2 },
     { phaseName: "Security Audit",        assistantRole: "Cyber Security Specialist",    userRole: "Chief Technology Officer", maxTurns: 2 },
-    { phaseName: "Coding",                assistantRole: "Programmer",                   userRole: "Code Reviewer",            maxTurns: 3 },
+    // Coding: Programmer writes code, saves file, launches demo.
+    // userRole is CTO (gives task requirements), NOT Code Reviewer (that is a separate phase).
+    // maxTurns=2: turn 1 = Programmer writes+saves+launches, turn 2 = CTO confirms or one correction.
+    { phaseName: "Coding",                assistantRole: "Programmer",                   userRole: "Chief Technology Officer", maxTurns: 2 },
+    // CodeReview: Reviewer reads saved file, gives structured feedback.
+    // Programmer reads feedback and applies fixes (re-saves).
+    // Repeats until Reviewer is satisfied and outputs <DONE>.
+    { phaseName: "CodeReview",            assistantRole: "Code Reviewer",                userRole: "Programmer",               maxTurns: 4 },
     { phaseName: "Documentation",         assistantRole: "Technical Writer",             userRole: "Chief Executive Officer",  maxTurns: 2 },
 ];
 

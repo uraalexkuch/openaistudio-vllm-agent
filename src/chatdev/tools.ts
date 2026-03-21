@@ -11,6 +11,8 @@ export interface ToolCall {
 }
 
 export function parseToolCall(responseText: string): ToolCall | null {
+    // Regex matches <name>toolname</name> — both tags must be "name".
+    // Schema in getToolsDescription() uses the same tag so models output correctly.
     const regex = /<tool_call>[\s\S]*?<name>(.*?)<\/name>[\s\S]*?<args>([\s\S]*?)<\/args>[\s\S]*?<\/tool_call>/i;
     const match = responseText.match(regex);
     if (match) {
@@ -43,7 +45,7 @@ export async function executeTool(toolCall: ToolCall): Promise<string> {
             try {
                 const workspaceFolder = path.join(__dirname, '..', '..', 'workspace');
                 const filePath = path.join(workspaceFolder, toolCall.args.filename);
-                if (!fs.existsSync(filePath)) return `Error: File "${toolCall.args.filename}" does not exist.`;
+                if (!fs.existsSync(filePath)) return `Error: File "${toolCall.args.filename}" does not exist in workspace.`;
                 return `File content of "${toolCall.args.filename}":\n${fs.readFileSync(filePath, 'utf8')}`;
             } catch (err: any) { return `Error reading file: ${err.message}`; }
         }
@@ -54,38 +56,39 @@ export async function executeTool(toolCall: ToolCall): Promise<string> {
     }
 }
 
-/**
- * Single source of truth for tool schema injected into agent prompts.
- */
 export function getToolsDescription(): string {
-    return `
-You have access to tools. To call a tool output EXACTLY this XML (one per turn, nothing else around it):
-
-<tool_call>
-<name>TOOL_NAME</name>
-<args>{"arg1": "value1"}</args>
-</tool_call>
-
-TOOLS:
-  write_file   — Save a file to the workspace.
-                 Args: {"filename": "chrestik.html", "content": "<full file content>"}
-
-  read_file    — Read a workspace file.
-                 Args: {"filename": "chrestik.html"}
-
-  launch_file  — Open an HTML file in the browser, other files in VS Code.
-                 Args: {"filename": "chrestik.html"}
-
-  web_search   — Search the web.
-                 Args: {"query": "..."}
-
-  delegate_to_expert — Sub-delegate to a specialist agent.
-                 Args: {"expert_role": "...", "task_description": "..."}
-
-MANDATORY RULES (task is NOT complete until these are done):
-1. Task names a file → call write_file with that exact name.
-2. Task says run/launch/demo/запусти/відкрий → call launch_file after write_file.
-3. Never just print code in markdown when a filename was specified.
-4. One tool call per turn — wait for <tool_result> before the next.
-`.trim();
+    return [
+        "You have access to tools. To call a tool output EXACTLY this XML (one call per turn, nothing else on that turn):",
+        "",
+        "<tool_call>",
+        "<name>TOOL_NAME</name>",
+        '<args>{"arg1": "value1"}</args>',
+        "</tool_call>",
+        "",
+        "After each tool call you will receive a <tool_result> block. Read it before the next action.",
+        "",
+        "AVAILABLE TOOLS:",
+        "",
+        "  write_file   — Save content to a file in the workspace.",
+        '                 Args: {"filename": "game.html", "content": "<full file content>"}',
+        "",
+        "  read_file    — Read a file from the workspace.",
+        '                 Args: {"filename": "game.html"}',
+        "",
+        "  launch_file  — Open HTML in the browser, other files in VS Code.",
+        '                 Args: {"filename": "game.html"}',
+        "",
+        "  web_search   — Search the web.",
+        '                 Args: {"query": "..."}',
+        "",
+        "  delegate_to_expert — Sub-delegate a subtask.",
+        '                 Args: {"expert_role": "...", "task_description": "..."}',
+        "",
+        "MANDATORY RULES:",
+        "1. Task specifies a filename → call write_file with that EXACT filename.",
+        "2. Task says run/launch/demo/запусти/відкрий → call launch_file AFTER write_file succeeds.",
+        "3. NEVER print file content in markdown when a filename was specified.",
+        "4. One tool call per turn. Wait for <tool_result> before the next call.",
+        "5. If write_file returns an error → fix the error before calling launch_file.",
+    ].join("\n");
 }

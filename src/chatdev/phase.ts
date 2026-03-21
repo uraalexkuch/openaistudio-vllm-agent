@@ -3,8 +3,8 @@ import { RoleType } from "../camel/typing";
 import { autoLoadSkillsForTask } from "./skills";
 import { getToolsDescription } from "./tools";
 
-// Phases where the assistant actively needs to write/launch files
-const FILE_TOOL_PHASES = new Set(["Coding", "Documentation", "ArchitectureRevision"]);
+// Phases where the assistant actively needs to write/read/launch files
+const FILE_TOOL_PHASES = new Set(["Coding", "CodeReview", "Documentation", "ArchitectureRevision"]);
 
 export class Phase {
     public phaseName: string;
@@ -54,10 +54,12 @@ export class Phase {
             this.assistantAgent.addSystemContext(skillsContext);
         }
 
-        // Inject tool schema for phases that produce files or need to launch demos.
-        // Only for the assistant (the one doing the work), not the reviewer/user agent.
+        // Inject tool schema for phases that produce/read files.
+        // Both assistant AND user get tools in CodeReview: reviewer uses read_file,
+        // programmer (userAgent) uses write_file to apply fixes.
         if (FILE_TOOL_PHASES.has(this.phaseName)) {
             this.assistantAgent.addSystemContext(getToolsDescription());
+            this.userAgent.addSystemContext(getToolsDescription());
         }
 
         // FIX 2: Language control — agents reason in English internally but the final
