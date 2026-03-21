@@ -173,17 +173,17 @@ function loadRoleConfig(extensionPath: string): RoleConfig {
 /**
  * Normalizes RoleConfig to extract systemPrompt and optional model for a given role.
  */
-function getRoleDetail(config: RoleConfig, roleName: string): { prompt: string, model?: string } {
+function getRoleDetail(config: RoleConfig, roleName: string): { prompt: string, model?: string, skills?: string[] } {
     // 1. Check if "roles" field exists (new structure)
     if (config.roles && config.roles[roleName]) {
         const detail = config.roles[roleName];
-        return { prompt: detail.systemPrompt, model: detail.model };
+        return { prompt: detail.systemPrompt, model: detail.model, skills: detail.skills };
     }
     // 2. Check if the role is a direct key
     const val = (config as any)[roleName];
     if (val) {
         if (typeof val === 'string') return { prompt: val };
-        return { prompt: val.systemPrompt, model: val.model };
+        return { prompt: val.systemPrompt, model: val.model, skills: val.skills };
     }
     // 3. Fallback
     return { prompt: `You are the ${roleName}. Append <DONE> when finished.` };
@@ -325,7 +325,17 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
             const assistantDetail = getRoleDetail(roleConfig, step.assistantRole);
             const userDetail      = getRoleDetail(roleConfig, step.userRole);
             chatChain.addPhase(
-                new Phase(step.phaseName, step.assistantRole, step.userRole, assistantDetail.prompt, userDetail.prompt, step.maxTurns, assistantDetail.model),
+                new Phase(
+                    step.phaseName,
+                    step.assistantRole,
+                    step.userRole,
+                    assistantDetail.prompt,
+                    userDetail.prompt,
+                    step.maxTurns,
+                    assistantDetail.model,
+                    VLLMModelBackend.currentTaskComplexity,
+                    assistantDetail.skills
+                ),
                 step.dependsOn
             );
         }
@@ -342,7 +352,9 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
                 assistantDetail.prompt,
                 userDetail.prompt,
                 maxTurnsFor(p.role), // Use p.role for maxTurns
-                assistantDetail.model // New: Pass model from config
+                assistantDetail.model, // New: Pass model from config
+                VLLMModelBackend.currentTaskComplexity,
+                assistantDetail.skills
             );
             chatChain.addPhase(phase, p.dependsOn);
         }

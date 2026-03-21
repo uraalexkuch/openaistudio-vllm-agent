@@ -10,9 +10,9 @@ export class Phase {
     public phaseName: string;
     private assistantAgent: ChatAgent;
     private userAgent: ChatAgent;
-    private maxTurns: number;
-
-    private taskComplexity: string;
+    private readonly maxTurns: number;
+    private readonly taskComplexity: string;
+    private readonly roleSkills?: string[];
 
     constructor(
         phaseName: string,
@@ -20,15 +20,17 @@ export class Phase {
         userRole: string,
         assistantPrompt: string,
         userPrompt: string,
-        maxTurns = 5,
+        maxTurns?: number,
         assistantModel?: string,
-        taskComplexity = "High"
+        taskComplexity: string = "High",
+        roleSkills?: string[]
     ) {
         this.phaseName = phaseName;
         this.taskComplexity = taskComplexity;
+        this.roleSkills = roleSkills;
         this.assistantAgent = new ChatAgent(assistantRole, RoleType.ASSISTANT, assistantPrompt, this.taskComplexity, assistantModel);
         this.userAgent = new ChatAgent(userRole, RoleType.USER, userPrompt, this.taskComplexity);
-        this.maxTurns = maxTurns;
+        this.maxTurns = maxTurns ?? 5;
     }
 
     public onEvent?: (ev: any) => void;
@@ -40,10 +42,21 @@ export class Phase {
         console.log(`Starting Phase: ${this.phaseName}`);
         this.onEvent?.({ type: 'narration', content: `Розпочато фазу: ${this.phaseName}` });
 
-        // FIX 1: Load skills but inject them as REFERENCE ONLY — not as a conversation to continue.
-        // Skills are appended AFTER the role description so the model sees its actual identity first.
-        // The framing explicitly tells the model to use skills as patterns, not to respond to them.
-        const loadedSkills = await autoLoadSkillsForTask(`${this.assistantAgent.getRoleName()} ${taskPrompt}`);
+        // FIX 1: Load skills. Priority: Specific skills from RoleConfig, then auto-load.
+        let loadedSkills: any[] = [];
+        
+        if (this.roleSkills && this.roleSkills.length > 0) {
+            console.log(`[Phase:${this.phaseName}] Loading specific skills: ${this.roleSkills.join(', ')}`);
+            // We'll try to match these names against folders in skillsPath
+            const allScored = await autoLoadSkillsForTask(`${this.roleSkills.join(' ')}`, "", 10);
+            loadedSkills = allScored.filter(s => this.roleSkills?.includes(s.folderName) || this.roleSkills?.includes(s.name));
+        }
+
+        if (loadedSkills.length === 0) {
+            // Fallback to auto-load logic if no specific skills or if they failed to load
+            loadedSkills = await autoLoadSkillsForTask(`${this.assistantAgent.getRoleName()} ${taskPrompt}`);
+        }
+
         if (loadedSkills.length > 0) {
             const skillNames = loadedSkills.map(s => s.name).join(', ');
             console.log(`[Phase:${this.phaseName}] Injecting skills: ${skillNames}`);

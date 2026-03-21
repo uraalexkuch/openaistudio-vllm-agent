@@ -4,7 +4,7 @@ import { autoLoadSkillsForTask } from "../chatdev/skills";
 
 export async function delegate_to_expert(expert_role: string, task_description: string): Promise<string> {
     console.log(`Delegating to expert: ${expert_role}. Task: ${task_description}`);
-    
+
     // Отримуємо релевантні навички (skills) для субагента (через парсинг SKILL.md)
     const loadedSkills = await autoLoadSkillsForTask(`${expert_role} ${task_description}`);
     const skillsText = loadedSkills.length > 0 ? `\n\n=== АКТУАЛЬНІ НАВИЧКИ (SKILLS) ===\n${loadedSkills.map(s => `[${s.name}]:\n${s.content}`).join('\n\n')}\n==================================\n` : '';
