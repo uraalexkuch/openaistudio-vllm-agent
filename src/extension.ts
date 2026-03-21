@@ -19,25 +19,42 @@ let isExecuting = false;
 type RoleConfig = Record<string, string>;
 
 // Ordered pipeline — roles must exist in RoleConfig.json
-const PIPELINE: Array<{
+// ── Static PIPELINE — used as FALLBACK if CEO analysis fails ─────────────────
+// CEO normally returns a dynamic DAG (see executeProject).
+// This fallback ensures the system works even if the model returns garbage.
+const FALLBACK_PIPELINE: Array<{
     phaseName: string;
     assistantRole: string;
     userRole: string;
     maxTurns: number;
+    dependsOn: string[];
 }> = [
-    { phaseName: "System Architecture",   assistantRole: "Chief Technology Officer",     userRole: "Chief Executive Officer",  maxTurns: 2 },
-    { phaseName: "Database Optimization", assistantRole: "Database Optimization Expert", userRole: "Chief Technology Officer", maxTurns: 2 },
-    { phaseName: "Security Audit",        assistantRole: "Cyber Security Specialist",    userRole: "Chief Technology Officer", maxTurns: 2 },
-    // Coding: Programmer writes code, saves file, launches demo.
-    // userRole is CTO (gives task requirements), NOT Code Reviewer (that is a separate phase).
-    // maxTurns=2: turn 1 = Programmer writes+saves+launches, turn 2 = CTO confirms or one correction.
-    { phaseName: "Coding",                assistantRole: "Programmer",                   userRole: "Chief Technology Officer", maxTurns: 2 },
-    // CodeReview: Reviewer reads saved file, gives structured feedback.
-    // Programmer reads feedback and applies fixes (re-saves).
-    // Repeats until Reviewer is satisfied and outputs <DONE>.
-    { phaseName: "CodeReview",            assistantRole: "Code Reviewer",                userRole: "Programmer",               maxTurns: 4 },
-    { phaseName: "Documentation",         assistantRole: "Technical Writer",             userRole: "Chief Executive Officer",  maxTurns: 2 },
+    { phaseName: "System Architecture",   assistantRole: "Chief Technology Officer",     userRole: "Chief Product Officer",    maxTurns: 2, dependsOn: [] },
+    { phaseName: "Coding",                assistantRole: "Programmer",                   userRole: "Chief Technology Officer", maxTurns: 2, dependsOn: ["System Architecture"] },
+    { phaseName: "CodeReview",            assistantRole: "Code Reviewer",                userRole: "Programmer",               maxTurns: 4, dependsOn: ["Coding"] },
+    { phaseName: "Documentation",         assistantRole: "Technical Writer",             userRole: "Chief Product Officer",    maxTurns: 2, dependsOn: ["CodeReview"] },
 ];
+
+// ── Role → default userRole counterpart ──────────────────────────────────────
+// When CEO defines a phase with only an assistantRole, we pick a sensible reviewer.
+const DEFAULT_USER_ROLE: Record<string, string> = {
+    "Programmer":                   "Chief Technology Officer",
+    "Chief Technology Officer":     "Chief Product Officer",
+    "Code Reviewer":                "Programmer",
+    "Technical Writer":             "Chief Product Officer",
+    "Database Optimization Expert": "Chief Technology Officer",
+    "Cyber Security Specialist":    "Chief Technology Officer",
+};
+
+// ── maxTurns per role ─────────────────────────────────────────────────────────
+const DEFAULT_MAX_TURNS: Record<string, number> = {
+    "Code Reviewer": 4,
+    "Programmer":    2,
+};
+function maxTurnsFor(role: string): number {
+    return DEFAULT_MAX_TURNS[role] ?? 2;
+}
+
 
 /**
  * Opens a step-by-step configuration wizard at first launch or when settings are missing.
@@ -228,91 +245,140 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
     const chatChain = new ChatChain();
     chatChain.onEvent = (ev) => ChatWebview.currentPanel?.broadcastEvent(ev);
 
-    ChatWebview.currentPanel?.broadcastEvent({ type: 'narration', content: `🔍 Аналізую необхідні етапи для завдання...` });
+    ChatWebview.currentPanel?.broadcastEvent({ type: 'narration', content: `🔍 Аналізую задачу та будую DAG...` });
 
-    // BUG FIX: reset to "High" at the start of every run so a previous "Low" result
-    // never bleeds into this one, and any CEO analysis failure leaves the system
-    // in the safest (most capable) state rather than stuck on a previous "Low".
+    // Reset complexity before each run
     VLLMModelBackend.currentTaskComplexity = "High";
 
-    let requiredPhases = ["System Architecture", "Coding", "Documentation"];
+    // ── Dynamic DAG interface ─────────────────────────────────────────────────
+    interface DagPhase {
+        name:       string;   // unique phase name, e.g. "Frontend Coding"
+        role:       string;   // assistantRole, e.g. "Programmer"
+        dependsOn:  string[]; // names of phases that must complete first
+    }
+
+    // ── CEO prompt — returns full DAG graph ───────────────────────────────────
+    let dagPhases: DagPhase[] = [];
+
+    const availableRoles = Object.keys(roleConfig).join(', ');
+
+    const ceoSystemPrompt = `You are a senior software architect. Analyze the task and return a JSON execution plan.
+Return ONLY valid JSON — no markdown, no explanation.
+
+Available roles: ${availableRoles}
+
+Response format:
+{
+  "complexity": "Low" | "High",
+  "phases": [
+    { "name": "<unique phase name>", "role": "<role from available roles>", "dependsOn": [] },
+    { "name": "<phase2>",            "role": "<role>",                      "dependsOn": ["<phase1>"] }
+  ]
+}
+
+Rules:
+- "name" must be unique across all phases
+- "dependsOn" lists names of phases that must finish before this one starts
+- Phases with no shared dependencies run in PARALLEL automatically
+- Always include a Coding phase and a Documentation phase
+- For simple tasks (single HTML/script): 3-4 phases max
+- For complex tasks (fullstack, microservices): split Coding into parallel parts
+  e.g. "Frontend Coding" + "Backend Coding" both depending on "System Architecture",
+  then "Integration" depending on both
+
+Example for a simple task:
+{"complexity":"Low","phases":[
+  {"name":"System Architecture","role":"Chief Technology Officer","dependsOn":[]},
+  {"name":"Coding","role":"Programmer","dependsOn":["System Architecture"]},
+  {"name":"Code Review","role":"Code Reviewer","dependsOn":["Coding"]},
+  {"name":"Documentation","role":"Technical Writer","dependsOn":["Code Review"]}
+]}
+
+Example for fullstack:
+{"complexity":"High","phases":[
+  {"name":"System Architecture","role":"Chief Technology Officer","dependsOn":[]},
+  {"name":"Database Design","role":"Database Optimization Expert","dependsOn":["System Architecture"]},
+  {"name":"Backend Coding","role":"Programmer","dependsOn":["Database Design"]},
+  {"name":"Frontend Coding","role":"Programmer","dependsOn":["System Architecture"]},
+  {"name":"Integration","role":"Code Reviewer","dependsOn":["Backend Coding","Frontend Coding"]},
+  {"name":"Documentation","role":"Technical Writer","dependsOn":["Integration"]}
+]}`;
+
+    let contextForCEO = globalSessionContext;
+    if (contextForCEO.length > 1500) {
+        contextForCEO = contextForCEO.substring(contextForCEO.length - 1500);
+    }
+    const ceoUserMsg = `Task: "${idea}"${contextForCEO ? `\nContext: ${contextForCEO}` : ""}`;
+
     try {
         const analyzer = new VLLMModelBackend("Chief Executive Officer");
-
-        let contextForCEO = globalSessionContext;
-        if (contextForCEO.length > 2000) {
-            contextForCEO = contextForCEO.substring(contextForCEO.length - 2000);
-        }
-        const ceoPrompt = idea + (contextForCEO ? `\n(Контекст: ${contextForCEO})` : "");
-
-        const analysisPrompt = `Ось поточне завдання: "${ceoPrompt}". 
-Які технічні етапи конче необхідні для реалізації та яка загальна складність цього завдання?
-Дай відповідь у форматі JSON з двома полями:
-1. "phases" - масив рядків. Можливі варіанти:
-- "System Architecture" (завжди потрібен)
-- "Database Optimization" (тільки якщо є бази даних або складна логіка)
-- "Security Audit" (тільки якщо є авторизація, захист даних)
-- "Coding" (завжди потрібен)
-- "Documentation" (завжди потрібен)
-2. "complexity" - рядок: "Low" (для простих задач, напр. HTML сторінка, один скрипт) або "High" (багато файлів, складна архітектура).
-
-Поверни ТІЛЬКИ валідний JSON без маркдауну і пояснень.
-Приклад: {"phases": ["System Architecture", "Coding", "Documentation"], "complexity": "Low"}`;
-
-        const response = await analyzer.step([
-            { role: "user", content: `Ти досвідчений системний архітектор. Повертай ТІЛЬКИ валідний JSON.\n\n${analysisPrompt}` }
+        const response  = await analyzer.step([
+            { role: "user", content: `${ceoSystemPrompt}\n\n${ceoUserMsg}` }
         ]);
 
-        let cleanedResponse = response.trim();
-        if (cleanedResponse.includes("```")) {
-            const match = cleanedResponse.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-            if (match && match[1]) {
-                cleanedResponse = match[1];
-            }
+        // Strip markdown fences if model wraps output anyway
+        let cleaned = response.trim();
+        const fenced = cleaned.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+        if (fenced) cleaned = fenced[1];
+
+        const parsed = JSON.parse(cleaned);
+
+        if (parsed.complexity) {
+            VLLMModelBackend.currentTaskComplexity =
+                String(parsed.complexity).toLowerCase() === "low" ? "Low" : "High";
         }
 
-        try {
-            const parsed = JSON.parse(cleanedResponse);
-            if (parsed && typeof parsed === 'object') {
-                if (Array.isArray(parsed.phases)) {
-                    requiredPhases = parsed.phases;
-                    VLLMModelBackend.currentTaskComplexity = (parsed.complexity === "Low" || parsed.complexity === "low") ? "Low" : "High";
-                } else if (Array.isArray(parsed) && parsed.length > 0) {
-                    requiredPhases = parsed;
-                    VLLMModelBackend.currentTaskComplexity = "High";
-                }
-                ChatWebview.currentPanel?.broadcastEvent({ type: 'narration', content: `⚙️ Вибрані етапи: ${requiredPhases.join(', ')} (Складність: ${VLLMModelBackend.currentTaskComplexity})` });
-            }
-        } catch (jsonErr) {
-            console.error("JSON Parse Error:", jsonErr, "Raw response:", response);
-            ChatWebview.currentPanel?.broadcastEvent({ type: 'narration', content: `⚠️ Не вдалося розібрати відповідь аналітика. Використовуємо повний план.` });
+        if (Array.isArray(parsed.phases) && parsed.phases.length > 0) {
+            // Validate each phase has required fields
+            dagPhases = parsed.phases
+                .filter((p: any) => p && typeof p.name === 'string' && typeof p.role === 'string')
+                .map((p: any) => ({
+                    name:      p.name.trim(),
+                    role:      p.role.trim(),
+                    dependsOn: Array.isArray(p.dependsOn) ? p.dependsOn.map((d: any) => String(d).trim()) : [],
+                }));
+
+            const planStr = dagPhases.map(p =>
+                `  ${p.name} [${p.role}]${p.dependsOn.length ? ` → after: ${p.dependsOn.join(', ')}` : ' (start)'}`
+            ).join('\n');
+            ChatWebview.currentPanel?.broadcastEvent({
+                type: 'narration',
+                content: `⚙️ Динамічний DAG (складність: ${VLLMModelBackend.currentTaskComplexity}):\n${planStr}`
+            });
         }
     } catch (e) {
-        console.error("Failed to parse required phases, using defaults", e);
+        console.error("CEO DAG analysis failed, using fallback pipeline:", e);
+        ChatWebview.currentPanel?.broadcastEvent({
+            type: 'narration',
+            content: `⚠️ CEO аналіз не вдався — використовую стандартний план.`
+        });
     }
 
-    const normalizedRequired = requiredPhases.map(p => p.toLowerCase().trim());
-    const actualPipeline = PIPELINE.filter(step =>
-        normalizedRequired.includes(step.phaseName.toLowerCase().trim())
-    );
+    // ── Build phase objects from DAG (or fallback) ────────────────────────────
+    if (dagPhases.length === 0) {
+        // Fallback: use static pipeline
+        for (const step of FALLBACK_PIPELINE) {
+            const assistantPrompt = roleConfig[step.assistantRole] || `You are ${step.assistantRole}.`;
+            const userPrompt      = roleConfig[step.userRole]      || `You are ${step.userRole}.`;
+            chatChain.addPhase(
+                new Phase(step.phaseName, step.assistantRole, step.userRole, assistantPrompt, userPrompt, step.maxTurns),
+                step.dependsOn
+            );
+        }
+    } else {
+        // Dynamic DAG from CEO
+        for (const dp of dagPhases) {
+            const assistantRole   = dp.role;
+            const userRole        = DEFAULT_USER_ROLE[assistantRole] ?? "Chief Product Officer";
+            const assistantPrompt = roleConfig[assistantRole] || `You are ${assistantRole}.`;
+            const userPrompt      = roleConfig[userRole]      || `You are ${userRole}.`;
+            const maxTurns        = maxTurnsFor(assistantRole);
 
-    if (actualPipeline.length === 0) {
-        actualPipeline.push(...PIPELINE);
-    }
-
-    for (const step of actualPipeline) {
-        // FIX: RoleConfig values are plain strings (system prompts), not objects with .systemPrompt
-        const assistantPrompt = roleConfig[step.assistantRole] || `Ти є ${step.assistantRole}.`;
-        const userPrompt      = roleConfig[step.userRole]      || `Ти є ${step.userRole}.`;
-
-        chatChain.addPhase(new Phase(
-            step.phaseName,
-            step.assistantRole,
-            step.userRole,
-            assistantPrompt,
-            userPrompt,
-            step.maxTurns
-        ));
+            chatChain.addPhase(
+                new Phase(dp.name, assistantRole, userRole, assistantPrompt, userPrompt, maxTurns),
+                dp.dependsOn
+            );
+        }
     }
 
     try {
