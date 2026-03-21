@@ -127,8 +127,8 @@
         },
         "openaistudio.modelCodeLight": {
           "type": "string",
-          "default": "qwen-code",
-          "markdownDescription": "**nginx path** для швидкого коду (Complexity=Low) та code review. Сервер: `qwen-code` → model id `qwen3-coder`, 0.765s, 32768 токенів. ⚠️ Шлях `qwen-code` ≠ назва моделі `qwen3-coder` — це обробляється автоматично."
+          "default": "qwen3-coder",
+          "markdownDescription": "**Model name** для швидкого коду (Complexity=Low) та code review. Сервер: `qwen3-coder` → 0.765s, 32768 токенів. URL: `/qwen3-coder/v1`"
         },
         "openaistudio.modelGeneral": {
           "type": "string",

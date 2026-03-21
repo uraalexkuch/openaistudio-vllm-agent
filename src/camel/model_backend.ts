@@ -42,24 +42,18 @@ export class VLLMModelBackend {
         // ── Configurable overrides ───────────────────────────────────────────
         const modelRouter    = config.get<string>("modelRouter",    "mistral").trim();
         const modelCodeHeavy = config.get<string>("modelCodeHeavy", "codestral").trim();
-        const modelCodeLight = config.get<string>("modelCodeLight", "qwen-code").trim();
+        // FIX: nginx routes by actual model name, not container name.
+        // Path is /qwen3-coder/v1, NOT /qwen-code/v1
+        const modelCodeLight = config.get<string>("modelCodeLight", "qwen3-coder").trim();
         const modelGeneral   = config.get<string>("modelGeneral",   "gemma").trim();
 
-        // ── URL-path → API-model-name map ────────────────────────────────────
-        // When nginx path and vLLM model id differ, list the mapping here.
-        // Format:  "nginx-path-segment": "vllm-model-id"
-        const PATH_TO_MODEL: Record<string, string> = {
-            "qwen-code": "qwen3-coder",
-            // add more if needed, e.g. "deepseek": "deepseek-coder-v2"
-        };
-
-        // ── Context window sizes per nginx path ──────────────────────────────
+        // ── Context window sizes per model name ──────────────────────────────
         const PATH_CONTEXT: Record<string, number> = {
-            "mistral":    4_096,
-            "qwen-code": 32_768,
-            "qwen":      16_384,
-            "codestral": 32_768,
-            "gemma":     16_384,
+            "mistral":     4_096,
+            "qwen3-coder": 32_768,
+            "qwen":        16_384,
+            "codestral":   32_768,
+            "gemma":       16_384,
         };
 
         const roleLower = roleName.toLowerCase();
@@ -96,8 +90,8 @@ export class VLLMModelBackend {
         }
 
         this.urlPath   = chosenPath.trim();
-        this.model     = PATH_TO_MODEL[this.urlPath] ?? this.urlPath; // resolve model id for API body
-        this.maxTokens = PATH_CONTEXT[this.urlPath]  ?? 16_384;
+        this.model     = this.urlPath; // nginx path == model name on this server
+        this.maxTokens = PATH_CONTEXT[this.urlPath] ?? 16_384;
 
         // CEO hard cap: leave room for output within mistral's 4096 total
         if (this.urlPath === "mistral") {
@@ -201,7 +195,7 @@ export class VLLMModelBackend {
             const estimatedInputTokens = this.estimateTokens(totalChars);
             const availableForOutput   = this.maxTokens - estimatedInputTokens;
             const maxOutputByFraction  = Math.floor(this.maxTokens * MAX_OUTPUT_FRACTION);
-            const requestedOutputTokens = Math.max(
+            requestedOutputTokens = Math.max(
                 256,
                 Math.min(maxOutputByFraction, availableForOutput)
             );
