@@ -218,10 +218,18 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
 
     ChatWebview.currentPanel?.broadcastEvent({ type: 'narration', content: `🔍 Аналізую необхідні етапи для завдання...` });
     
-    let requiredPhases = PIPELINE.map(p => p.phaseName);
+    let requiredPhases = ["System Architecture", "Coding", "Documentation"]; // Sensible default
     try {
         const analyzer = new VLLMModelBackend("Chief Executive Officer");
-        const analysisPrompt = `Ось поточне завдання з історією: "${fullExecutionPrompt}". 
+        
+        // Truncate context for CEO to stay within 4k limit of Mistral
+        let contextForCEO = globalSessionContext;
+        if (contextForCEO.length > 2000) {
+            contextForCEO = contextForCEO.substring(contextForCEO.length - 2000);
+        }
+        const ceoPrompt = idea + (contextForCEO ? `\n(Контекст: ${contextForCEO})` : "");
+
+        const analysisPrompt = `Ось поточне завдання: "${ceoPrompt}". 
 Які технічні етапи конче необхідні для реалізації та яка загальна складність цього завдання?
 Дай відповідь у форматі JSON з двома полями:
 1. "phases" - масив рядків. Можливі варіанти:
@@ -236,27 +244,43 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
 Приклад: {"phases": ["System Architecture", "Coding", "Documentation"], "complexity": "Low"}`;
 
         const response = await analyzer.step([
-            { role: "system", content: "Ти досвідчений системний архітектор. Повертай ТІЛЬКИ валідний JSON." },
-            { role: "user", content: analysisPrompt }
+            { role: "user", content: `Ти досвідчений системний архітектор. Повертай ТІЛЬКИ валідний JSON.\n\n${analysisPrompt}` }
         ]);
         
-        const cleanedResponse = response.replace(/```json/gi, "").replace(/```/g, "").trim();
-        const parsed = JSON.parse(cleanedResponse);
-        if (parsed && Array.isArray(parsed.phases)) {
-            requiredPhases = parsed.phases;
-            VLLMModelBackend.currentTaskComplexity = parsed.complexity === "Low" ? "Low" : "High";
-            ChatWebview.currentPanel?.broadcastEvent({ type: 'narration', content: `⚙️ Вибрані етапи: ${requiredPhases.join(', ')} (Складність: ${VLLMModelBackend.currentTaskComplexity})` });
-        } else if (Array.isArray(parsed) && parsed.length > 0) {
-            // Fallback for older format if model hallucinated
-            requiredPhases = parsed;
-            VLLMModelBackend.currentTaskComplexity = "High";
-            ChatWebview.currentPanel?.broadcastEvent({ type: 'narration', content: `⚙️ Вибрані етапи: ${requiredPhases.join(', ')} (Складність: High)` });
+        let cleanedResponse = response.trim();
+        // Remove markdown code blocks if present
+        if (cleanedResponse.includes("```")) {
+            const match = cleanedResponse.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+            if (match && match[1]) {
+                cleanedResponse = match[1];
+            }
+        }
+        
+        try {
+            const parsed = JSON.parse(cleanedResponse);
+            if (parsed && typeof parsed === 'object') {
+                if (Array.isArray(parsed.phases)) {
+                    requiredPhases = parsed.phases;
+                    VLLMModelBackend.currentTaskComplexity = (parsed.complexity === "Low" || parsed.complexity === "low") ? "Low" : "High";
+                } else if (Array.isArray(parsed) && parsed.length > 0) {
+                    requiredPhases = parsed;
+                    VLLMModelBackend.currentTaskComplexity = "High";
+                }
+                ChatWebview.currentPanel?.broadcastEvent({ type: 'narration', content: `⚙️ Вибрані етапи: ${requiredPhases.join(', ')} (Складність: ${VLLMModelBackend.currentTaskComplexity})` });
+            }
+        } catch (jsonErr) {
+            console.error("JSON Parse Error:", jsonErr, "Raw response:", response);
+            ChatWebview.currentPanel?.broadcastEvent({ type: 'narration', content: `⚠️ Не вдалося розібрати відповідь аналітика. Використовуємо повний план.` });
         }
     } catch (e) {
         console.error("Failed to parse required phases, using defaults", e);
     }
 
-    const actualPipeline = PIPELINE.filter(step => requiredPhases.includes(step.phaseName));
+    const normalizedRequired = requiredPhases.map(p => p.toLowerCase().trim());
+    const actualPipeline = PIPELINE.filter(step => {
+        return normalizedRequired.includes(step.phaseName.toLowerCase().trim());
+    });
+    
     if (actualPipeline.length === 0) {
         actualPipeline.push(...PIPELINE);
     }
