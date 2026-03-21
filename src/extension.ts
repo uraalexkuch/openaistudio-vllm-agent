@@ -198,27 +198,28 @@ ${availableRoles}
 Response format:
 {"complexity":"Low"|"High","phases":[{"name":"<unique name>","role":"<EXACT role from list above>","dependsOn":[]}]}
 
-Rules:
+CRITICAL RULES:
 - "role" MUST be copied EXACTLY from the allowed roles list — no variations, no invented roles
 - "name" must be unique across all phases
 - "dependsOn" lists names of phases that must finish first ([] for start phases)
-- Phases with no shared dependencies run in PARALLEL automatically
-- Simple tasks (single file, HTML, script): 3-4 phases max. Use "Programmer", NOT "Frontend Developer"
-- Complex fullstack: use "Frontend Developer" + "Backend Developer" in parallel
 
-Example simple HTML task:
+IMPORTANT — SINGLE FILE RULE:
+If the entire deliverable is ONE FILE (e.g. a single .html, .py, .js file), use EXACTLY this structure:
 {"complexity":"Low","phases":[
   {"name":"Coding","role":"Programmer","dependsOn":[]},
   {"name":"Code Review","role":"Code Reviewer","dependsOn":["Coding"]},
   {"name":"Documentation","role":"Technical Writer","dependsOn":["Code Review"]}
 ]}
+Do NOT split a single file into separate HTML/CSS/JS phases — all code goes in one Coding phase.
 
-Example fullstack:
+Parallel phases are ONLY for genuinely independent deliverables (e.g. separate frontend + backend servers).
+
+Example fullstack (two separate servers):
 {"complexity":"High","phases":[
   {"name":"System Architecture","role":"Chief Technology Officer","dependsOn":[]},
-  {"name":"Frontend Coding","role":"Frontend Developer","dependsOn":["System Architecture"]},
-  {"name":"Backend Coding","role":"Backend Developer","dependsOn":["System Architecture"]},
-  {"name":"Integration Review","role":"Code Reviewer","dependsOn":["Frontend Coding","Backend Coding"]},
+  {"name":"Frontend","role":"Frontend Developer","dependsOn":["System Architecture"]},
+  {"name":"Backend","role":"Backend Developer","dependsOn":["System Architecture"]},
+  {"name":"Integration Review","role":"Code Reviewer","dependsOn":["Frontend","Backend"]},
   {"name":"Documentation","role":"Technical Writer","dependsOn":["Integration Review"]}
 ]}`;
 

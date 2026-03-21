@@ -332,23 +332,25 @@ function buildSkillMeta(filePath: string, skillsPath: string): SkillMeta {
 export async function autoLoadSkillsForTask(
     task: string,
     workspaceContext = '',
-    maxSkills = 3,
+    maxSkills = 2,  // FIX: reduced from 3 to 2 — fewer skills = less noise in prompts
 ): Promise<LoadedSkill[]> {
   const combined = [task, workspaceContext].filter(Boolean).join('\n');
   if (!combined.trim()) return [];
 
-  // FIX: Use minScore=7 as primary threshold. Only fall back to minScore=5
-  // (not 2 as before) to avoid loading completely unrelated skills.
-  const allScored = scanAndScoreAllSkillsIdf(combined, new Set(), 7);
+  // FIX: raised primary threshold to 10 (was 7).
+  // Skills like azure-storage, auri-voice were loading for unrelated tasks
+  // because generic tokens like "code", "review", "create" scored 5-7.
+  // At score≥10 only genuinely domain-specific skills load.
+  const allScored = scanAndScoreAllSkillsIdf(combined, new Set(), 10);
 
   if (allScored.length === 0) {
-    // Soft fallback: try a moderately lower bar before giving up
-    const fallback = scanAndScoreAllSkillsIdf(combined, new Set(), 5);
+    // Soft fallback at 8 — still high enough to avoid false positives
+    const fallback = scanAndScoreAllSkillsIdf(combined, new Set(), 8);
     if (fallback.length > 0) {
-      console.log(`[Skills] Primary threshold found nothing; using fallback (score≥5). Skills: ${fallback.slice(0, maxSkills).map(s => s.name).join(', ')}`);
+      console.log(`[Skills] Using fallback threshold (score≥8): ${fallback.slice(0, maxSkills).map(s => s.name).join(', ')}`);
       return loadTopSkills(fallback, maxSkills);
     }
-    console.log(`[Skills] No relevant skills found for task. Proceeding without skills.`);
+    console.log(`[Skills] No relevant skills found. Proceeding without skills.`);
     return [];
   }
 
