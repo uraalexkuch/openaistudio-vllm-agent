@@ -81,14 +81,26 @@ export class Phase {
             `When you have reviewed the result and have no more corrections or questions, append exactly <DONE> at the end of your response.`
         );
 
-        // FIX 4: Wrap the task so the model clearly sees "THIS is what I need to do"
-        // rather than potentially treating skill examples as context to continue.
+        // Extract the original user task from the context block.
+        // chat_chain passes: "=== SUMMARIES... ===\n...\n\n=== TASK ===\n<original task>"
+        // We want to put the original task FIRST so the model always sees it clearly.
+        let originalTask = taskPrompt.trim();
+        const taskMarker = '=== TASK ===\n';
+        const taskIdx = taskPrompt.indexOf(taskMarker);
+        if (taskIdx !== -1) {
+            originalTask = taskPrompt.substring(taskIdx + taskMarker.length).trim();
+        }
+
+        // Wrap the task so the model clearly sees "THIS is what I need to do"
         const wrappedTaskPrompt = [
-            `=== YOUR CURRENT TASK (phase: ${this.phaseName}) ===`,
-            taskPrompt.trim(),
+            `=== ORIGINAL USER TASK ===`,
+            originalTask,
             `=== END OF TASK ===`,
-            `Focus exclusively on the task above. Do not discuss the reference skills.`,
-        ].join('\n');
+            ``,
+            `=== YOUR ROLE IN THIS PHASE: ${this.phaseName} ===`,
+            `Execute the task above. Do not invent a different task. Do not ask clarifying questions — proceed directly.`,
+            taskIdx !== -1 ? `\n=== CONTEXT FROM PREVIOUS PHASES ===\n${taskPrompt.substring(0, taskIdx).trim()}` : '',
+        ].filter(Boolean).join('\n');
 
         let currentMessage = wrappedTaskPrompt;
         let finalCodeOrResult = "";

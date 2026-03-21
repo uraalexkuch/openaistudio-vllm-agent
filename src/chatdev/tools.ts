@@ -12,7 +12,8 @@ export interface ToolCall {
 }
 
 export function parseToolCall(responseText: string): ToolCall | null {
-    const regex = /<tool_call>[\s\S]*?<name>(.*?)<\/name>[\s\S]*?<args>([\s\S]*?)<\/args>[\s\S]*?<\/tool_call>/i;
+    // Flexible: matches <n>tool</n> OR <n>tool</name> — handles model tag inconsistencies
+    const regex = /<tool_call>[\s\S]*?<\w+>(.*?)<\/\w+>[\s\S]*?<args>([\s\S]*?)<\/args>[\s\S]*?<\/tool_call>/i;
     const match = responseText.match(regex);
     if (match) {
         try {

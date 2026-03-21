@@ -11,26 +11,27 @@ This extension implements a **multi-agent software development system** inspired
 │              VS Code Extension UI         │
 │         (Webview: chat_webview.ts)        │
 ├──────────────────────────────────────────┤
-│              Chat Chain Orchestrator      │
-│            (chat_chain.ts + phase.ts)     │
+│        Chat Chain DAG Orchestrator        │
+│    (chat_chain.ts + phase.ts + memory.ts) │
 │                                          │
-│  Phase 1: Demand Analysis (CEO)    ◄──HITL (Plan Verification)
-│  Phase 2: System Architecture (CTO)
-│  Phase 3: Security Audit / DB Optimization
-│  Phase 4: Coding (Programmer)      ◄──HITL (Code Review)
-│  Phase 5: Documentation (TechWriter)
+│  Phase 1: DAG Analysis (CEO / Gemma)     │
+│       ↓                                  │
+│  [Parallel Phase Launch] ⚡              │
+│  Phase A (CTO) ──┬──► Phase C (QA)       │
+│  Phase B (DB)  ──┘                       │
+│       ↓                                  │
+│  Summarization Agent (CPO / Gemma)       │
 ├──────────────────────────────────────────┤
 │             Agent Communication Layer     │
 │  (chat_agent.ts + model_backend.ts)      │
 │                                          │
 │  ┌─────────────────┐  ┌───────────────┐  │
 │  │  Model Routing  │  │  Skill Loader │  │
-│  │  qwen / codestral  │  │  TF-IDF IDF │  │
+│  │  Dynamic/Nginx  │  │  TF-IDF Match │  │
 │  └─────────────────┘  └───────────────┘  │
 ├──────────────────────────────────────────┤
 │         Tool System (tools.ts)            │
 │  read_file | write_file | web_search     │
-│  delegate_to_expert | save_skill         │
 ├──────────────────────────────────────────┤
 │     vLLM Server: http://10.1.0.102:8050  │
 └──────────────────────────────────────────┘
@@ -53,16 +54,25 @@ This extension implements a **multi-agent software development system** inspired
 | `RoleConfig.json` | Declares roles, context, and preferred skills. |
 | `workspace/` | Shared workspace folder where agents read and write files. |
 
-## Dynamic Pipeline & Complexity Analysis
+## Dynamic DAG Pipeline & Complexity Analysis
 
-The system intercepts the task execution (`extension.ts`) before building the `ChatChain`. It queries the `Chief Executive Officer` model (using `mistral` for ultra-fast response) with the user's idea to return a JSON object.
+The system intercepts the task execution (`extension.ts`) before building the `ChatChain`. It queries the `Chief Executive Officer` model (using `gemma` for larger context) to analyze the task and return a **Directed Acyclic Graph (DAG)** of phases.
 
 **The CEO determines:**
 
-1. **Phases:** A JSON array of strictly necessary stages (e.g., `["System Architecture", "Coding", "Documentation"]`).
+1. **DAG Graph:** A JSON structure of phases with their roles and `dependsOn` arrays.
 2. **Complexity:** `"Low"` or `"High"`.
 
-This allows the system to bypass unnecessary work (like `Database Optimization` for a simple UI) and intelligently select the best model for the task's difficulty.
+**Parallel Execution:**
+The `ChatChain` orchestrator (`chat_chain.ts`) parses this graph and identifies phases whose dependencies are met. It uses `Promise.all` to launch independent phases simultaneously, drastically reducing the total execution time for complex projects.
+
+## Intelligent Technical Summarization
+
+To prevent context window overflow (especially with models like Mistral 4k), the system implements a **Summarization Agent (CPO)**:
+
+1. After each phase completes, the full raw output is stored in `Memory` (on-disk log).
+2. The `CPO` (using `gemma`) generates a compact technical summary of the phase (key decisions, files, TODOs).
+3. Only these summaries are passed as context to subsequent phases in the DAG.
 
 ## Terminating Feedback Loops
 
@@ -100,7 +110,14 @@ To ensure a smooth user experience, all agent responses are streamed to the WebV
 
 | Role | Model (High Complexity) | Model (Low Complexity) | Description |
 |------|-------|-------------|-------------|
-| **Chief Executive Officer** | `mistral` | `mistral` | Ultra-fast (0.3s) for task analysis and routing. |
-| **Programmer / CTO** | `codestral` | `qwen-code` | Switched to Qwen (0.7s) for simple tasks to save power. |
-| **Reviewer / QA / Test** | `qwen-code` | `qwen-code` | High speed and accuracy for logic verification. |
-| **Others (Writer/CPO)** | `gemma` | `gemma` | General purpose tasks. |
+| **CEO / Router** | `gemma` | `gemma` | High context (16k) for complex DAG analysis and routing. |
+| **Summarizer (CPO)** | `gemma` | `gemma` | Professional summarization and state management. |
+| **Programmer / CTO** | `codestral` | `qwen3-coder` | Specialized coding models with 32k context. |
+| **Reviewer / QA / Test** | `qwen3-coder` | `qwen3-coder` | Fast (0.7s) logic verification. |
+| **Others (Writer)** | `gemma` | `gemma` | General purpose documentation. |
+
+## Robustness & Security
+
+- **Role Alternation:** `VLLMModelBackend` strictly enforces `user`/`assistant` role alternation to satisfy strict model requirements (Mistral 400 errors).
+- **Context Safety:** Dynamic token calculation reserves 35% of the context for output and applies safety truncation for extremely large inputs.
+- **Fail-safe Fallback:** If dynamic DAG analysis fails, the system automatically falls back to a predefined static sequential pipeline.

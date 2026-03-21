@@ -260,49 +260,50 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
     // ── CEO prompt — returns full DAG graph ───────────────────────────────────
     let dagPhases: DagPhase[] = [];
 
-    const availableRoles = Object.keys(roleConfig).join(', ');
+    const availableRoles = Object.keys(roleConfig).join('", "');
 
     const ceoSystemPrompt = `You are a senior software architect. Analyze the task and return a JSON execution plan.
-Return ONLY valid JSON — no markdown, no explanation.
+Return ONLY valid JSON — no markdown, no explanation, no text before or after the JSON.
 
-Available roles: ${availableRoles}
+ALLOWED ROLES (use EXACTLY these strings, nothing else):
+"${availableRoles}"
 
 Response format:
-{
-  "complexity": "Low" | "High",
-  "phases": [
-    { "name": "<unique phase name>", "role": "<role from available roles>", "dependsOn": [] },
-    { "name": "<phase2>",            "role": "<role>",                      "dependsOn": ["<phase1>"] }
-  ]
-}
+{"complexity":"Low"|"High","phases":[{"name":"<unique name>","role":"<EXACT role from list above>","dependsOn":[]}]}
 
 Rules:
+- "role" MUST be copied EXACTLY from the allowed roles list above — no variations, no new roles
 - "name" must be unique across all phases
-- "dependsOn" lists names of phases that must finish before this one starts
-- Phases with no shared dependencies run in PARALLEL automatically
-- Always include a Coding phase and a Documentation phase
-- For simple tasks (single HTML/script): 3-4 phases max
-- For complex tasks (fullstack, microservices): split Coding into parallel parts
-  e.g. "Frontend Coding" + "Backend Coding" both depending on "System Architecture",
-  then "Integration" depending on both
+- "dependsOn" lists names of phases that must finish first ([] for start phases)
+- Phases with no shared dependencies run in PARALLEL
+- Simple tasks (single file): 3-4 phases max. Use "Programmer" for coding, NOT "Frontend Developer"
+- Complex fullstack: split coding into parallel parts using "Frontend Developer" + "Backend Developer"
 
-Example for a simple task:
+Example simple HTML task:
 {"complexity":"Low","phases":[
-  {"name":"System Architecture","role":"Chief Technology Officer","dependsOn":[]},
-  {"name":"Coding","role":"Programmer","dependsOn":["System Architecture"]},
+  {"name":"Coding","role":"Programmer","dependsOn":[]},
   {"name":"Code Review","role":"Code Reviewer","dependsOn":["Coding"]},
   {"name":"Documentation","role":"Technical Writer","dependsOn":["Code Review"]}
 ]}
 
-Example for fullstack:
+Example fullstack:
 {"complexity":"High","phases":[
   {"name":"System Architecture","role":"Chief Technology Officer","dependsOn":[]},
-  {"name":"Database Design","role":"Database Optimization Expert","dependsOn":["System Architecture"]},
-  {"name":"Backend Coding","role":"Programmer","dependsOn":["Database Design"]},
-  {"name":"Frontend Coding","role":"Programmer","dependsOn":["System Architecture"]},
-  {"name":"Integration","role":"Code Reviewer","dependsOn":["Backend Coding","Frontend Coding"]},
-  {"name":"Documentation","role":"Technical Writer","dependsOn":["Integration"]}
+  {"name":"Frontend Coding","role":"Frontend Developer","dependsOn":["System Architecture"]},
+  {"name":"Backend Coding","role":"Backend Developer","dependsOn":["System Architecture"]},
+  {"name":"Integration Review","role":"Code Reviewer","dependsOn":["Frontend Coding","Backend Coding"]},
+  {"name":"Documentation","role":"Technical Writer","dependsOn":["Integration Review"]}
 ]}`;
+
+    Example for fullstack:
+    {"complexity":"High","phases":[
+        {"name":"System Architecture","role":"Chief Technology Officer","dependsOn":[]},
+        {"name":"Database Design","role":"Database Optimization Expert","dependsOn":["System Architecture"]},
+        {"name":"Backend Coding","role":"Programmer","dependsOn":["Database Design"]},
+        {"name":"Frontend Coding","role":"Programmer","dependsOn":["System Architecture"]},
+        {"name":"Integration","role":"Code Reviewer","dependsOn":["Backend Coding","Frontend Coding"]},
+        {"name":"Documentation","role":"Technical Writer","dependsOn":["Integration"]}
+    ]}`;
 
     let contextForCEO = globalSessionContext;
     if (contextForCEO.length > 1500) {
@@ -329,14 +330,36 @@ Example for fullstack:
         }
 
         if (Array.isArray(parsed.phases) && parsed.phases.length > 0) {
-            // Validate each phase has required fields
+            const knownRoles = new Set(Object.keys(roleConfig));
+
             dagPhases = parsed.phases
                 .filter((p: any) => p && typeof p.name === 'string' && typeof p.role === 'string')
-                .map((p: any) => ({
-                    name:      p.name.trim(),
-                    role:      p.role.trim(),
-                    dependsOn: Array.isArray(p.dependsOn) ? p.dependsOn.map((d: any) => String(d).trim()) : [],
-                }));
+                .map((p: any) => {
+                    let role = p.role.trim();
+                    // If CEO hallucinated a role not in RoleConfig, remap to nearest known role
+                    if (!knownRoles.has(role)) {
+                        const roleLower = role.toLowerCase();
+                        if (roleLower.includes('frontend') || roleLower.includes('ui') || roleLower.includes('design')) {
+                            role = 'Frontend Developer';
+                        } else if (roleLower.includes('backend') || roleLower.includes('server') || roleLower.includes('api')) {
+                            role = 'Backend Developer';
+                        } else if (roleLower.includes('review') || roleLower.includes('qa') || roleLower.includes('test')) {
+                            role = 'Code Reviewer';
+                        } else if (roleLower.includes('doc') || roleLower.includes('writer')) {
+                            role = 'Technical Writer';
+                        } else if (roleLower.includes('architect') || roleLower.includes('cto') || roleLower.includes('tech')) {
+                            role = 'Chief Technology Officer';
+                        } else {
+                            role = 'Programmer'; // safest fallback
+                        }
+                        console.warn(`CEO used unknown role "${p.role.trim()}" → remapped to "${role}"`);
+                    }
+                    return {
+                        name:      p.name.trim(),
+                        role,
+                        dependsOn: Array.isArray(p.dependsOn) ? p.dependsOn.map((d: any) => String(d).trim()) : [],
+                    };
+                });
 
             const planStr = dagPhases.map(p =>
                 `  ${p.name} [${p.role}]${p.dependsOn.length ? ` → after: ${p.dependsOn.join(', ')}` : ' (start)'}`
@@ -449,38 +472,38 @@ export function activate(context: vscode.ExtensionContext) {
 
             try {
                 const resp = await axios.get(`${vllmUrl}/models`);
-                const models = resp.data.data.map((m: any) => m.id);
-                const picked = await vscode.window.showQuickPick(models, { title: 'Оберіть модель для vLLM' });
-                if (picked) {
-                    await config.update('model', picked, vscode.ConfigurationTarget.Global);
-                    vscode.window.showInformationMessage(`Модель змінено на: ${picked}`);
-                }
-            } catch (e) {
-                vscode.window.showErrorMessage('Не вдалося отримати список моделей з vLLM.');
-            }
-        }));
-
-        const editorCommands = [
-            { id: 'openaistudio.explainFile',   prompt: 'Поясни структуру та логіку цього файлу:' },
-            { id: 'openaistudio.fixSelection',  prompt: 'Знайди та виправ помилки у виділеному коді:' },
-            { id: 'openaistudio.refactor',      prompt: 'Зроби рефакторинг виділеного коду (Clean Code):' },
-            { id: 'openaistudio.writeTests',    prompt: 'Напиши Unit-тести для виділеного коду:' },
-            { id: 'openaistudio.implement',     prompt: 'Реалізуй функціонал на основі коментарів у виділеному коді:' }
-        ];
-
-        for (const cmd of editorCommands) {
-            context.subscriptions.push(vscode.commands.registerCommand(cmd.id, async () => {
-                const ws = new WorkspaceManager(context);
-                const editorContext = ws.gatherContext();
-                const fileContent = ws.getActiveFileContent();
-                const fullPrompt = `${cmd.prompt}\n\nКод/Файл:\n${fileContent}\n\nКонтекст проєкта:\n${editorContext}`;
-                await executeProject(fullPrompt, context);
-            }));
-        }
-    } catch (error: any) {
-        vscode.window.showErrorMessage(`Помилка активації OpenAIStudio: ${error.message}`);
-        console.error('Activation error:', error);
+    const models = resp.data.data.map((m: any) => m.id);
+    const picked = await vscode.window.showQuickPick(models, { title: 'Оберіть модель для vLLM' });
+    if (picked) {
+        await config.update('model', picked, vscode.ConfigurationTarget.Global);
+        vscode.window.showInformationMessage(`Модель змінено на: ${picked}`);
     }
+} catch (e) {
+    vscode.window.showErrorMessage('Не вдалося отримати список моделей з vLLM.');
+}
+}));
+
+const editorCommands = [
+    { id: 'openaistudio.explainFile',   prompt: 'Поясни структуру та логіку цього файлу:' },
+    { id: 'openaistudio.fixSelection',  prompt: 'Знайди та виправ помилки у виділеному коді:' },
+    { id: 'openaistudio.refactor',      prompt: 'Зроби рефакторинг виділеного коду (Clean Code):' },
+    { id: 'openaistudio.writeTests',    prompt: 'Напиши Unit-тести для виділеного коду:' },
+    { id: 'openaistudio.implement',     prompt: 'Реалізуй функціонал на основі коментарів у виділеному коді:' }
+];
+
+for (const cmd of editorCommands) {
+    context.subscriptions.push(vscode.commands.registerCommand(cmd.id, async () => {
+        const ws = new WorkspaceManager(context);
+        const editorContext = ws.gatherContext();
+        const fileContent = ws.getActiveFileContent();
+        const fullPrompt = `${cmd.prompt}\n\nКод/Файл:\n${fileContent}\n\nКонтекст проєкта:\n${editorContext}`;
+        await executeProject(fullPrompt, context);
+    }));
+}
+} catch (error: any) {
+    vscode.window.showErrorMessage(`Помилка активації OpenAIStudio: ${error.message}`);
+    console.error('Activation error:', error);
+}
 }
 
 export function deactivate() {}
