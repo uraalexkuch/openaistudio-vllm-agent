@@ -22,7 +22,19 @@ interface RoleDetail {
 
 type RoleConfig = Record<string, string | RoleDetail> & { roles?: Record<string, RoleDetail> };
 
-const FALLBACK_PIPELINE: Array<{
+const LIGHT_PIPELINE: Array<{
+    phaseName: string;
+    assistantRole: string;
+    userRole: string;
+    maxTurns: number;
+    dependsOn: string[];
+}> = [
+    { phaseName: "Implementation",       assistantRole: "Programmer",       userRole: "Chief Technology Officer", maxTurns: 2, dependsOn: [] },
+    { phaseName: "Code Review",          assistantRole: "Code Reviewer",    userRole: "Programmer",               maxTurns: 4, dependsOn: ["Implementation"] },
+    { phaseName: "Project Documentation",assistantRole: "Technical Writer", userRole: "Chief Executive Officer",  maxTurns: 2, dependsOn: ["Code Review"] },
+];
+
+const HEAVY_PIPELINE: Array<{
     phaseName: string;
     assistantRole: string;
     userRole: string;
@@ -38,6 +50,8 @@ const FALLBACK_PIPELINE: Array<{
     { phaseName: "Code Review",          assistantRole: "Code Reviewer",                 userRole: "Programmer",               maxTurns: 4, dependsOn: ["Quality Assurance"] },
     { phaseName: "Project Documentation",assistantRole: "Technical Writer",              userRole: "Chief Executive Officer",  maxTurns: 2, dependsOn: ["Code Review"] },
 ];
+
+const FALLBACK_PIPELINE = LIGHT_PIPELINE;
 
 const DEFAULT_USER_ROLE: Record<string, string> = {
     "Chief Executive Officer":      "Chief Product Officer",
@@ -231,11 +245,10 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
 
     const ceoSystemPrompt = `Your goal is to complete the task: ${idea}\n` +
                 "You have access to specialized roles specified in RoleConfig.json.\n" +
-                "HEAVY PROJECTS (Complex logic, files, DB, Security): Use 8 roles sequentially: " +
-                "Chief Executive Officer -> Chief Technology Officer -> Database Optimization Expert -> Cyber Security Specialist -> Programmer -> Software Test Engineer -> Code Reviewer -> Technical Writer.\n" +
-                "LIGHT PROJECTS (Single scripts, simple UI): Use 3 roles: Programmer -> Code Reviewer -> Technical Writer.\n" +
-                "Return ONLY valid JSON including 'complexity' ('Low' or 'High') and 'plan' (an array of phases).\n" +
-                "Each phase MUST have 'phaseName', 'assistantRole', 'userRole', 'maxTurns', and 'dependsOn'.\n" +
+                "PRELIMINARY EVALUATION: Estimate the number of 'distinct developer operations' (e.g. creating a file, auditing security, optimizing DB).\n" +
+                "LIGHT PROJECTS (Estimated operations < 5): Use 3 roles (Programmer, Code Reviewer, Technical Writer).\n" +
+                "HEAVY PROJECTS (Estimated operations >= 5): Use 8 roles (CEO, CTO, DB Expert, Security, Programmer, Test Engineer, Code Reviewer, Technical Writer).\n" +
+                "Return ONLY valid JSON including 'estimated_operations' (integer), 'justification' (short string), 'complexity' ('Low' or 'High'), and 'plan' (an array of phases).\n" +
                 "IMPORTANT: Respond ONLY with a valid JSON object.";
 
     let contextForCEO = globalSessionContext;
@@ -254,7 +267,11 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
 
         const parsed = JSON.parse(cleaned);
 
-        if (parsed.complexity) {
+        if (parsed.estimated_operations !== undefined) {
+            const ops = Number(parsed.estimated_operations);
+            VLLMModelBackend.currentTaskComplexity = ops >= 5 ? "High" : "Low";
+            console.log(`CEO Analysis: Estimated Operations = ${ops}, Complexity = ${VLLMModelBackend.currentTaskComplexity}`);
+        } else if (parsed.complexity) {
             VLLMModelBackend.currentTaskComplexity =
                 String(parsed.complexity).toLowerCase() === "low" ? "Low" : "High";
         }
@@ -309,17 +326,12 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
     }> = [];
 
     if (dagPhases.length === 0) {
-        const isSimpleTask = idea.length < 150 &&
-                            !idea.toLowerCase().includes('database') &&
-                            !idea.toLowerCase().includes('security') &&
-                            !idea.toLowerCase().includes('api') &&
-                            !idea.toLowerCase().includes('architecture');
+        // Fallback or explicit simple task logic
+        const isVerySimple = idea.length < 50; // Only use ultra-short for absolute fallback
 
-        plan = isSimpleTask ? [
-            { phaseName: "Implementation",       assistantRole: "Programmer",       userRole: "Chief Technology Officer", maxTurns: 2, dependsOn: [] },
-            { phaseName: "Code Review",          assistantRole: "Code Reviewer",    userRole: "Programmer",               maxTurns: 4, dependsOn: ["Implementation"] },
-            { phaseName: "Project Documentation",assistantRole: "Technical Writer", userRole: "Chief Executive Officer",  maxTurns: 2, dependsOn: ["Code Review"] },
-        ] : FALLBACK_PIPELINE;
+        plan = (isVerySimple || VLLMModelBackend.currentTaskComplexity === "Low") 
+            ? LIGHT_PIPELINE 
+            : HEAVY_PIPELINE;
 
         for (const step of plan) {
             const assistantDetail = getRoleDetail(roleConfig, step.assistantRole);
