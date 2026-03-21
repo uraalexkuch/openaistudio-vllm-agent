@@ -222,16 +222,18 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
     try {
         const analyzer = new VLLMModelBackend("Chief Executive Officer");
         const analysisPrompt = `Ось поточне завдання з історією: "${fullExecutionPrompt}". 
-Які технічні етапи конче необхідні для реалізації? 
-Дай відповідь у форматі JSON масиву рядків. Можливі варіанти:
+Які технічні етапи конче необхідні для реалізації та яка загальна складність цього завдання?
+Дай відповідь у форматі JSON з двома полями:
+1. "phases" - масив рядків. Можливі варіанти:
 - "System Architecture" (завжди потрібен)
-- "Database Optimization" (тільки якщо є збереження даних, бази даних, складна логіка стану)
-- "Security Audit" (тільки якщо є бекенд, API, авторизація, захист даних)
+- "Database Optimization" (тільки якщо є бази даних або складна логіка)
+- "Security Audit" (тільки якщо є авторизація, захист даних)
 - "Coding" (завжди потрібен)
 - "Documentation" (завжди потрібен)
+2. "complexity" - рядок: "Low" (для простих задач, напр. HTML сторінка, один скрипт) або "High" (багато файлів, складна архітектура).
 
-Поверни ТІЛЬКИ валідний JSON масив без маркдауну, без пояснень.
-Наприклад: ["System Architecture", "Coding", "Documentation"]`;
+Поверни ТІЛЬКИ валідний JSON без маркдауну і пояснень.
+Приклад: {"phases": ["System Architecture", "Coding", "Documentation"], "complexity": "Low"}`;
 
         const response = await analyzer.step([
             { role: "system", content: "Ти досвідчений системний архітектор. Повертай ТІЛЬКИ валідний JSON." },
@@ -240,9 +242,15 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
         
         const cleanedResponse = response.replace(/```json/gi, "").replace(/```/g, "").trim();
         const parsed = JSON.parse(cleanedResponse);
-        if (Array.isArray(parsed) && parsed.length > 0) {
+        if (parsed && Array.isArray(parsed.phases)) {
+            requiredPhases = parsed.phases;
+            VLLMModelBackend.currentTaskComplexity = parsed.complexity === "Low" ? "Low" : "High";
+            ChatWebview.currentPanel?.broadcastEvent({ type: 'narration', content: `⚙️ Вибрані етапи: ${requiredPhases.join(', ')} (Складність: ${VLLMModelBackend.currentTaskComplexity})` });
+        } else if (Array.isArray(parsed) && parsed.length > 0) {
+            // Fallback for older format if model hallucinated
             requiredPhases = parsed;
-            ChatWebview.currentPanel?.broadcastEvent({ type: 'narration', content: `⚙️ Вибрані етапи: ${requiredPhases.join(', ')}` });
+            VLLMModelBackend.currentTaskComplexity = "High";
+            ChatWebview.currentPanel?.broadcastEvent({ type: 'narration', content: `⚙️ Вибрані етапи: ${requiredPhases.join(', ')} (Складність: High)` });
         }
     } catch (e) {
         console.error("Failed to parse required phases, using defaults", e);

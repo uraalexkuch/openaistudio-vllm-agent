@@ -60,14 +60,20 @@ export class Phase {
                 content: `[${assistantName}] ${actionDesc}...` 
             });
             
-            const assistantResponse = await this.assistantAgent.step(currentMessage);
-            
             this.onEvent?.({ 
-                type: 'answer', 
+                type: 'answer_stream_start',
                 role: assistantName,
-                model: assistantModel,
-                content: assistantResponse 
+                model: assistantModel
             });
+
+            const assistantResponse = await this.assistantAgent.step(currentMessage, 0.2, (token) => {
+                this.onEvent?.({
+                    type: 'answer_stream_chunk',
+                    content: token
+                });
+            });
+            
+            this.onEvent?.({ type: 'answer_stream_end' });
             finalCodeOrResult += assistantResponse + "\n";
             
             if (this.checkTermination(assistantResponse)) {
@@ -84,16 +90,23 @@ export class Phase {
                 content: `[${userName}] перевіряє результат та дає фідбек...` 
             });
             
-            currentMessage = await this.userAgent.step(assistantResponse);
-            
             this.onEvent?.({ 
-                type: 'answer', 
+                type: 'answer_stream_start',
                 role: userName,
-                model: userModel,
-                content: currentMessage 
+                model: userModel
             });
 
+            currentMessage = await this.userAgent.step(assistantResponse, 0.2, (token) => {
+                this.onEvent?.({
+                    type: 'answer_stream_chunk',
+                    content: token
+                });
+            });
+            
+            this.onEvent?.({ type: 'answer_stream_end' });
+
             if (this.checkTermination(currentMessage)) {
+
                 break;
             }
         }

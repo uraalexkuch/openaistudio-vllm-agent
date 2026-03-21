@@ -3,6 +3,7 @@ import * as vscode from "vscode";
 import { ChatMessage } from "./typing";
 
 export class VLLMModelBackend {
+    public static currentTaskComplexity: string = "High";
     private openai: OpenAI;
     private model: string;
     private maxTokens: number;
@@ -19,22 +20,28 @@ export class VLLMModelBackend {
 
         // 2. Dynamic Dispatcher (MODEL_ROUTING)
         const roleLower = roleName.toLowerCase();
-        if (roleLower.includes("programmer")) {
-            this.model = "codestral";
+        const isComplex = VLLMModelBackend.currentTaskComplexity === "High";
+
+        if (roleLower.includes("chief") || roleLower.includes("executive") || roleLower.includes("analyzer")) {
+            // CEO/Analyzer only extracts JSON - Mistral is 0.3s layout
+            this.model = "mistral";
+            this.maxTokens = 4096;
+        } else if (roleLower.includes("programmer")) {
+            // Qwen-code is 0.76s, Codestral is 1.96s
+            this.model = isComplex ? "codestral" : "qwen-code";
             this.maxTokens = 32000;
         } else if (roleLower.includes("reviewer") || roleLower.includes("qa") || roleLower.includes("test")) {
             this.model = "qwen-code";
             this.maxTokens = 32000;
         } else if (roleLower.includes("technology") || roleLower.includes("cto")) {
-            this.model = "codestral"; // CTO also gets the coding model for technical design
+            this.model = isComplex ? "codestral" : "qwen-code";
             this.maxTokens = 32000;
         } else {
-            // CEO, CPO, CCO, etc. use the general purpose model (e.g., qwen or gemma)
-            this.model = defaultModel;
+            // Documenter, CCO, etc.
+            this.model = defaultModel; // e.g. gemma
             this.maxTokens = 16384; 
         }
 
-        
         this.model = this.model.trim();
 
         // 3. Construct dynamic baseURL: http://IP:PORT/<model>/v1
@@ -67,19 +74,35 @@ export class VLLMModelBackend {
     /**
      * Send messages to the vLLM API and return the response text.
      */
-    async step(messages: ChatMessage[], temperature = 0.2): Promise<string> {
+    async step(messages: ChatMessage[], temperature = 0.2, onToken?: (token: string) => void): Promise<string> {
         try {
-            // Safer max_tokens calculation to avoid context limit errors (leaving ~30% for prompt)
             const requestedOutputTokens = Math.floor(this.maxTokens * 0.7); 
             
-            const response = await this.openai.chat.completions.create({
-                model: this.model,
-                messages: messages as any,
-                temperature: temperature,
-                max_tokens: requestedOutputTokens
-            });
-            
-            return response.choices[0].message?.content || "";
+            if (onToken) {
+                const stream = await this.openai.chat.completions.create({
+                    model: this.model,
+                    messages: messages as any,
+                    temperature: temperature,
+                    max_tokens: requestedOutputTokens,
+                    stream: true
+                });
+
+                let fullText = "";
+                for await (const chunk of stream) {
+                    const token = chunk.choices[0]?.delta?.content || "";
+                    fullText += token;
+                    onToken(token);
+                }
+                return fullText;
+            } else {
+                const response = await this.openai.chat.completions.create({
+                    model: this.model,
+                    messages: messages as any,
+                    temperature: temperature,
+                    max_tokens: requestedOutputTokens
+                });
+                return response.choices[0].message?.content || "";
+            }
 
         } catch (error) {
             console.error(`Error communicating with vLLM API (Model: ${this.model}):`, error);

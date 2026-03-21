@@ -2,12 +2,11 @@
 
 ## Architecture Overview
 
-This extension implements a **multi-agent software development system** inspired by ChatDev,
-running entirely locally via a vLLM-compatible backend.
+This extension implements a **multi-agent software development system** inspired by ChatDev, running entirely locally via a vLLM-compatible backend.
 
 ### System Layers
 
-```
+```text
 ┌──────────────────────────────────────────┐
 │              VS Code Extension UI         │
 │         (Webview: chat_webview.ts)        │
@@ -32,7 +31,6 @@ running entirely locally via a vLLM-compatible backend.
 │         Tool System (tools.ts)            │
 │  read_file | write_file | web_search     │
 │  delegate_to_expert | save_skill         │
-│  read_file                               │
 ├──────────────────────────────────────────┤
 │     vLLM Server: http://10.1.0.102:8050  │
 └──────────────────────────────────────────┘
@@ -55,13 +53,16 @@ running entirely locally via a vLLM-compatible backend.
 | `RoleConfig.json` | Declares roles, context, and preferred skills. |
 | `workspace/` | Shared workspace folder where agents read and write files. |
 
-## Dynamic Pipeline Generation
+## Dynamic Pipeline & Complexity Analysis
 
-The system intercepts the task execution (`extension.ts`) before building the `ChatChain`. It queries the `Chief Executive Officer` model with the user's idea to return a JSON array of strictly necessary phases. 
+The system intercepts the task execution (`extension.ts`) before building the `ChatChain`. It queries the `Chief Executive Officer` model (using `mistral` for ultra-fast response) with the user's idea to return a JSON object.
 
-For instance:
-- A simple browser game might yield `["System Architecture", "Coding", "Documentation"]`, successfully bypassing the `Database Optimization` and `Security Audit` phases.
-- A complex full-stack app will trigger the full pipeline.
+**The CEO determines:**
+
+1. **Phases:** A JSON array of strictly necessary stages (e.g., `["System Architecture", "Coding", "Documentation"]`).
+2. **Complexity:** `"Low"` or `"High"`.
+
+This allows the system to bypass unnecessary work (like `Database Optimization` for a simple UI) and intelligently select the best model for the task's difficulty.
 
 ## Terminating Feedback Loops
 
@@ -69,7 +70,7 @@ To prevent infinite dialogue loops (e.g., between the Programmer and Code Review
 
 ## Human-in-the-Loop Flow
 
-```
+```text
 User Input → Phase 1 (CEO Analysis)
     ↓
 [HITL Pause] → "Review Plan" prompt in VS Code.
@@ -81,20 +82,25 @@ Phase 2 (Architecture) → Phase 3 (Security)
 Phase 4 (Coding) → HITL Code Review (Optional) → Phase 5 (Docs)
 ```
 
+## Real-time Streaming UI
+
+To ensure a smooth user experience, all agent responses are streamed to the WebView in real-time.
+
+- **Mechanism:** The `ModelBackend` uses `stream: true` and forwards tokens via `AgentEvent` (`answer_stream_chunk`).
+- **Visuals:** Tokens are rendered as they arrive, accompanied by a blinking cursor and a generation indicator 🟢.
+- **Benefit:** Eliminates the "frozen" feeling during long generations.
 
 ## How Skills Are Loaded
 
 1. `autoLoadSkillsForTask(role + task)` is called before each phase starts.
 2. The skills directory (`C:\Users\ITYURA\Documents\antigravity-awesome-skills`) is scanned.
-3. All `SKILL.md` files are tokenized and scored using TF-IDF against the combined `role + task` query.
-4. Top 3 matching skills are injected into the assistant agent's system prompt.
-5. The agent then uses these skills as domain-specific instructions.
+3. Top 3 matching skills are injected into the assistant agent's system prompt.
 
-## Model Routing
+## Model Routing (Latency-Optimized)
 
-| Role | Model | Description |
-|------|-------|-------------|
-| Programmer, CTO | `codestral` | Optimized for generation and technical design. |
-| Reviewer, QA, Test | `qwen-code` | Optimized for logic verification and test suites. |
-| CEO, CPO, CCO, Others | `default` | General purpose tasks and strategy. |
-
+| Role | Model (High Complexity) | Model (Low Complexity) | Description |
+|------|-------|-------------|-------------|
+| **Chief Executive Officer** | `mistral` | `mistral` | Ultra-fast (0.3s) for task analysis and routing. |
+| **Programmer / CTO** | `codestral` | `qwen-code` | Switched to Qwen (0.7s) for simple tasks to save power. |
+| **Reviewer / QA / Test** | `qwen-code` | `qwen-code` | High speed and accuracy for logic verification. |
+| **Others (Writer/CPO)** | `gemma` | `gemma` | General purpose tasks. |

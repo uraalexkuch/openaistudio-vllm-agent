@@ -37,7 +37,7 @@ export class ChatAgent {
     /**
      * Adds a new message from another agent (or user) and asks vLLM for a response.
      */
-    async step(incomingMessage: string): Promise<string> {
+    async step(incomingMessage: string, temperature = 0.2, onToken?: (token: string) => void): Promise<string> {
         // Add the incoming message to memory
         this.memory.push({
             role: "user",
@@ -45,7 +45,7 @@ export class ChatAgent {
         });
 
         // Request generation from vLLM
-        let responseText = await this.backend.step(this.memory);
+        let responseText = await this.backend.step(this.memory, temperature, onToken);
 
         // Tool retry loop
         let toolCall = parseToolCall(responseText);
@@ -63,7 +63,7 @@ export class ChatAgent {
             });
 
             // Call vLLM again
-            responseText = await this.backend.step(this.memory);
+            responseText = await this.backend.step(this.memory, temperature, onToken);
             toolCall = parseToolCall(responseText);
         }
 

@@ -207,9 +207,54 @@
             wrap.className = 'msg msg-answer';
             const roleLabel = ev.role ? ev.role.toUpperCase() : "АГЕНТ";
             const modelTag = ev.model ? ` <span style="font-size: 9px; opacity: 0.5; margin-left:8px;">${ev.model}</span>` : "";
-            wrap.innerHTML = `<div class="msg-label">${roleLabel}${modelTag}</div><div class="msg-body">${ev.content}</div>`;
+            
+            const labelDiv = document.createElement('div');
+            labelDiv.className = 'msg-label';
+            labelDiv.innerHTML = `${roleLabel}${modelTag}`;
+            
+            const bodyDiv = document.createElement('div');
+            bodyDiv.className = 'msg-body';
+            bodyDiv.textContent = ev.content;
+            
+            wrap.appendChild(labelDiv);
+            wrap.appendChild(bodyDiv);
             chatEl.appendChild(wrap);
 
+        } else if (ev.type === 'answer_stream_start') {
+            thinkLive.style.display = 'none';
+            currentThinkEl = null;
+            const wrap = document.createElement('div');
+            wrap.className = 'msg msg-answer';
+            const roleLabel = ev.role ? ev.role.toUpperCase() : "АГЕНТ";
+            const modelTag = ev.model ? ` <span style="font-size: 9px; opacity: 0.5; margin-left:8px;">${ev.model}</span>` : "";
+            
+            const labelDiv = document.createElement('div');
+            labelDiv.className = 'msg-label';
+            labelDiv.innerHTML = `${roleLabel}${modelTag} <span class="dot" style="background:#22c55e; animation: pulse 1s infinite; margin-left: 5px;"></span>`;
+            
+            const bodyDiv = document.createElement('div');
+            bodyDiv.className = 'msg-body';
+            
+            wrap.appendChild(labelDiv);
+            wrap.appendChild(bodyDiv);
+            chatEl.appendChild(wrap);
+            
+            currentAnswerStreamEl = bodyDiv;
+            
+        } else if (ev.type === 'answer_stream_chunk') {
+            if (currentAnswerStreamEl) {
+                currentAnswerStreamEl.textContent += (ev.content || "");
+            }
+        } else if (ev.type === 'answer_stream_end') {
+            if (currentAnswerStreamEl) {
+                // Remove the blinking dot
+                const parentLabel = currentAnswerStreamEl.previousElementSibling;
+                if (parentLabel) {
+                    const dot = parentLabel.querySelector('.dot');
+                    if (dot) dot.remove();
+                }
+            }
+            currentAnswerStreamEl = null;
         } else if (ev.type === 'done') {
             btnSend.style.display = 'flex';
             btnStop.style.display = 'none';
