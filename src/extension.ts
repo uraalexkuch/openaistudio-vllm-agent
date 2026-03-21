@@ -223,6 +223,11 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
 
     ChatWebview.currentPanel?.broadcastEvent({ type: 'narration', content: `🔍 Аналізую необхідні етапи для завдання...` });
 
+    // BUG FIX: reset to "High" at the start of every run so a previous "Low" result
+    // never bleeds into this one, and any CEO analysis failure leaves the system
+    // in the safest (most capable) state rather than stuck on a previous "Low".
+    VLLMModelBackend.currentTaskComplexity = "High";
+
     let requiredPhases = ["System Architecture", "Coding", "Documentation"];
     try {
         const analyzer = new VLLMModelBackend("Chief Executive Officer");

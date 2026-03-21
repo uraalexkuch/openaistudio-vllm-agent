@@ -39,13 +39,20 @@ export class VLLMModelBackend {
             this.model = isComplex ? "codestral" : "qwen-code";
             this.maxTokens = 32000;
         } else if (roleLower.includes("reviewer") || roleLower.includes("qa") || roleLower.includes("test")) {
-            this.model = "qwen-code";
+            // BUG FIX: reviewer now follows complexity — complex projects need thorough review
+            this.model = isComplex ? "codestral" : "qwen-code";
             this.maxTokens = 32000;
         } else if (roleLower.includes("technology") || roleLower.includes("cto")) {
             this.model = isComplex ? "codestral" : "qwen-code";
             this.maxTokens = 32000;
+        } else if (roleLower.includes("database") || roleLower.includes("security") || roleLower.includes("cyber")) {
+            // BUG FIX: DB Expert and Security Specialist handle heavy technical content —
+            // they need 32k context, not the 16k default that the else branch provides.
+            this.model = isComplex ? "codestral" : "qwen-code";
+            this.maxTokens = 32000;
         } else {
-            this.model = defaultModel;
+            // Technical Writer, CPO, and other general-purpose roles
+            this.model = defaultModel; // gemma
             this.maxTokens = 16384;
         }
 
