@@ -55,6 +55,18 @@ running entirely locally via a vLLM-compatible backend.
 | `RoleConfig.json` | Declares roles, context, and preferred skills. |
 | `workspace/` | Shared workspace folder where agents read and write files. |
 
+## Dynamic Pipeline Generation
+
+The system intercepts the task execution (`extension.ts`) before building the `ChatChain`. It queries the `Chief Executive Officer` model with the user's idea to return a JSON array of strictly necessary phases. 
+
+For instance:
+- A simple browser game might yield `["System Architecture", "Coding", "Documentation"]`, successfully bypassing the `Database Optimization` and `Security Audit` phases.
+- A complex full-stack app will trigger the full pipeline.
+
+## Terminating Feedback Loops
+
+To prevent infinite dialogue loops (e.g., between the Programmer and Code Reviewer), `Phase.ts` dynamically injects a `<DONE>` instruction into the system prompts. The execution explicitly breaks out of the loop immediately after either the assistant or the user agent produces the `<DONE>` marker, ensuring token efficiency and prompt progression.
+
 ## Human-in-the-Loop Flow
 
 ```
