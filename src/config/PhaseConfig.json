@@ -1,0 +1,42 @@
+{
+    "DemandAnalysis": {
+        "assistant_role_name": "Chief Executive Officer",
+        "user_role_name": "Chief Product Officer",
+        "phase_prompt": "Analyze the user prompt and generate an MVP plan."
+    },
+    "ArchitectureDesign": {
+        "assistant_role_name": "Chief Technology Officer",
+        "user_role_name": "Chief Executive Officer",
+        "phase_prompt": "Design the system architecture based on the MVP plan."
+    },
+    "DatabaseOptimization": {
+        "assistant_role_name": "Database Optimization Expert",
+        "user_role_name": "Chief Technology Officer",
+        "phase_prompt": "Check database schemas for 3NF and performance."
+    },
+    "SecurityAudit": {
+        "assistant_role_name": "Cyber Security Specialist",
+        "user_role_name": "Chief Technology Officer",
+        "phase_prompt": "Audit the architecture for potential vulnerabilities."
+    },
+    "ArchitectureRevision": {
+        "assistant_role_name": "Chief Technology Officer",
+        "user_role_name": "Chief Executive Officer",
+        "phase_prompt": "Revise the architecture based on human feedback."
+    },
+    "Coding": {
+        "assistant_role_name": "Programmer",
+        "user_role_name": "Chief Technology Officer",
+        "phase_prompt": "Implement the code for the project."
+    },
+    "CodeReview": {
+        "assistant_role_name": "Code Reviewer",
+        "user_role_name": "Programmer",
+        "phase_prompt": "Review the code."
+    },
+    "Documentation": {
+        "assistant_role_name": "Technical Writer",
+        "user_role_name": "Programmer",
+        "phase_prompt": "Compile the professional README.md."
+    }
+}

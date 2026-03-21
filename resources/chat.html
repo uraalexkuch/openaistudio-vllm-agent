@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OpenAIStudio Agent</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%;
+    background: #0d0f12;
+    color: #e2e8f0;
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    font-size: 13px;
+    line-height: 1.6;
+    overflow: hidden;
+  }
+  #app { display: flex; flex-direction: column; height: 100vh; }
+  #header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px;
+    background: #131618;
+    border-bottom: 1px solid #2a2d33;
+    flex-shrink: 0;
+  }
+  #header-title {
+    font-family: 'Courier New', Courier, monospace;
+    font-weight: 700;
+    font-size: 13px;
+    color: #00e5ff;
+    letter-spacing: .05em;
+    flex: 1;
+  }
+  #model-select, #lang-select {
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 11px;
+    color: #94a3b8;
+    background: #1a1d21;
+    border: 1px solid #2a2d33;
+    border-radius: 4px;
+    padding: 2px 20px 2px 8px;
+    cursor: pointer;
+    outline: none;
+    appearance: none;
+    -webkit-appearance: none;
+  }
+  #model-select:hover, #lang-select:hover { border-color: #00e5ff; color: #00e5ff; }
+  #btn-clear {
+    background: none;
+    border: 1px solid #2a2d33;
+    border-radius: 6px;
+    color: #64748b;
+    cursor: pointer;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-family: inherit;
+    transition: all .15s;
+  }
+  #btn-clear:hover { border-color: #353940; color: #94a3b8; }
+  #progress-wrap { height: 3px; background: #131618; flex-shrink: 0; display: none; }
+  #progress-bar { height: 100%; width: 0%; background: #00e5ff; transition: width .4s ease; }
+  #chat { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  #chat::-webkit-scrollbar { width: 5px; }
+  #chat::-webkit-scrollbar-thumb { background: #353940; border-radius: 3px; }
+  #empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: #64748b; text-align: center; padding: 40px; }
+  #empty .big { font-size: 36px; line-height: 1; margin-bottom: 8px; }
+  #empty .title { font-size: 15px; color: #94a3b8; font-weight: 600; }
+  #empty .hints { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; width: 100%; max-width: 340px; }
+  #empty .hint { font-family: 'Courier New', Courier, monospace; font-size: 11px; background: #1a1d21; border: 1px solid #2a2d33; border-radius: 6px; padding: 7px 12px; cursor: pointer; color: #94a3b8; text-align: left; }
+  #empty .hint:hover { border-color: #00e5ff; color: #00e5ff; background: #0d1a1e; }
+  .msg { display: flex; flex-direction: column; gap: 4px; animation: fadeIn .18s ease; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(5px); } to { opacity:1; transform:none; } }
+  .msg-label { font-family: 'Courier New', Courier, monospace; font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; display: flex; align-items: center; gap: 6px; }
+  .dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+  .msg-body { border-radius: 8px; padding: 11px 14px; line-height: 1.7; word-break: break-word; border-left: 3px solid transparent; }
+  .msg-user .msg-label { color: #6b8cff; }
+  .msg-user .msg-body { background: #1e2433; border-left-color: #3b4cca; }
+  .msg-answer .msg-label { color: #22c55e; }
+  .msg-answer .msg-body { background: #141a14; border-left-color: #22c55e; white-space: pre-wrap; }
+  .msg-thinking .msg-label { color: #7c3aed; cursor: pointer; }
+  .msg-thinking .msg-body { background: #12121a; border-left-color: #7c3aed; color: #64748b; font-family: 'Courier New', Courier, monospace; font-size: 11px; white-space: pre-wrap; max-height: 240px; overflow-y: auto; }
+  .msg-thinking.collapsed .msg-body { display: none; }
+  .msg-tool .msg-label { color: #f59e0b; }
+  .msg-tool .msg-body { background: #1a1510; border-left-color: #f59e0b; }
+  .tool-name { font-family: 'Courier New', Courier, monospace; font-size: 12px; font-weight: 700; color: #f59e0b; margin-bottom: 4px; }
+  .tool-args { font-family: 'Courier New', Courier, monospace; font-size: 11px; color: #64748b; white-space: pre-wrap; }
+  .msg-result .msg-label { color: #475569; }
+  .msg-result .msg-body { background: #131618; border-left-color: #2a2d33; font-family: 'Courier New', Courier, monospace; font-size: 11px; color: #94a3b8; white-space: pre-wrap; max-height: 240px; overflow-y: auto; }
+  .msg-status .msg-body { background: transparent; border: none; padding: 0 2px; font-size: 11px; color: #64748b; }
+  #input-wrap { border-top: 1px solid #2a2d33; background: #131618; padding: 12px; flex-shrink: 0; }
+  #input-row { display: flex; gap: 8px; align-items: flex-end; }
+  #input { flex: 1; background: #1a1d21; border: 1px solid #2a2d33; border-radius: 8px; color: #e2e8f0; font-family: inherit; font-size: 13px; line-height: 1.5; padding: 9px 12px; resize: none; min-height: 40px; max-height: 180px; outline: none; }
+  #btn-send, #btn-stop { width: 40px; height: 40px; border-radius: 8px; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all .15s; }
+  #btn-send { background: #00e5ff; color: #000; font-size: 18px; }
+  #btn-stop { background: #ef4444; color: #fff; display: none; }
+  #thinking-live { display: none; align-items: center; gap: 8px; padding: 6px 16px; color: #7c3aed; font-size: 11px; font-family: 'Courier New', Courier, monospace; }
+  .pulse { display: flex; gap: 3px; }
+  .pulse span { width: 5px; height: 5px; background: #7c3aed; border-radius: 50%; animation: pulse 1s infinite; }
+  @keyframes pulse { 0%,100% { opacity:.3; } 50% { opacity:1; } }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="header">
+    <span id="header-title">OPENAISTUDIO</span>
+    <select id="lang-select">
+      <option value="Ukrainian">UK</option>
+      <option value="English">EN</option>
+    </select>
+    <select id="model-select"></select>
+    <button id="btn-clear">Очистити</button>
+  </div>
+  <div id="progress-wrap"><div id="progress-bar"></div></div>
+  <div id="chat">
+    <div id="empty">
+      <div class="big">🚀</div>
+      <div class="title">OpenAIStudio Agent</div>
+      <div class="hints">
+        <div class="hint" data-hint="Поясни структуру цього проєкту">📁 Поясни структуру цього проєкту</div>
+        <div class="hint" data-hint="Знайди та виправ баги у відкритому файлі">🐛 Знайди та виправ баги</div>
+      </div>
+    </div>
+  </div>
+  <div id="thinking-live">
+    <div class="pulse"><span></span><span></span><span></span></div>
+    <span id="thinking-step">Думаємо…</span>
+  </div>
+  <div id="input-wrap">
+    <div id="input-row">
+      <textarea id="input" rows="1" placeholder="Постав завдання агенту…"></textarea>
+      <button id="btn-send">&#x2191;</button>
+      <button id="btn-stop">&#x25A0;</button>
+    </div>
+  </div>
+</div>
+<script>
+  const vscode = acquireVsCodeApi();
+  const chatEl = document.getElementById('chat');
+  const emptyEl = document.getElementById('empty');
+  const inputEl = document.getElementById('input');
+  const btnSend = document.getElementById('btn-send');
+  const btnStop = document.getElementById('btn-stop');
+  const btnClear = document.getElementById('btn-clear');
+  const modelSelect = document.getElementById('model-select');
+  const langSelect = document.getElementById('lang-select');
+  const progBar = document.getElementById('progress-bar');
+  const progWrap = document.getElementById('progress-wrap');
+  const thinkLive = document.getElementById('thinking-live');
+  let currentThinkEl = null;
+
+  function send() {
+    const text = inputEl.value.trim();
+    if (!text) return;
+    inputEl.value = '';
+    vscode.postMessage({ type: 'run_task', text, lang: langSelect.value });
+  }
+
+  btnSend.onclick = send;
+  btnClear.onclick = () => {
+    chatEl.innerHTML = '';
+    chatEl.appendChild(emptyEl);
+    emptyEl.style.display = 'flex';
+    vscode.postMessage({ type: 'clear' });
+  };
+
+  window.addEventListener('message', e => {
+    const data = e.data;
+    if (data.type === 'models_list') {
+        modelSelect.innerHTML = data.models.map(m => `<option value="${m}" ${m===data.current ? 'selected':''}>${m}</option>`).join('');
+    } else if (data.type === 'task_start') {
+        emptyEl.style.display = 'none';
+        btnSend.style.display = 'none';
+        btnStop.style.display = 'flex';
+        progWrap.style.display = 'block';
+    } else if (data.type === 'agent_event') {
+        const ev = data.event;
+        const chat = document.getElementById('chat');
+        
+        if (ev.type === 'phase_start' || ev.type === 'narration') {
+            const wrap = document.createElement('div');
+            wrap.className = 'msg msg-status';
+            wrap.innerHTML = `<div class="msg-body" style="color: #00e5ff; font-weight: 600; text-align: center; border: 1px solid #2a2d33; background: #1a1d21; margin: 10px 0; padding: 8px;">🚀 ${ev.content}</div>`;
+            chatEl.appendChild(wrap);
+        } else if (ev.type === 'thinking') {
+            thinkLive.style.display = 'flex';
+            const modelTag = ev.model ? ` [${ev.model}]` : "";
+            document.getElementById('thinking-step').textContent = (ev.content || "Думаємо...") + modelTag;
+            
+            if (!currentThinkEl) {
+                const wrap = document.createElement('div');
+                wrap.className = 'msg msg-thinking collapsed';
+                wrap.onclick = () => wrap.classList.toggle('collapsed');
+                const labelModel = ev.model ? ` <small style="opacity:0.6">(${ev.model})</small>` : "";
+                wrap.innerHTML = `<div class="msg-label">ПРОЦЕС ${labelModel} (натисніть щоб розгорнути)</div><div class="msg-body"></div>`;
+                chatEl.appendChild(wrap);
+                currentThinkEl = wrap.querySelector('.msg-body');
+            }
+            if (ev.content) {
+                currentThinkEl.textContent += ev.content + "\n";
+            }
+        } else if (ev.type === 'answer') {
+            thinkLive.style.display = 'none';
+            currentThinkEl = null;
+            const wrap = document.createElement('div');
+            wrap.className = 'msg msg-answer';
+            const roleLabel = ev.role ? ev.role.toUpperCase() : "АГЕНТ";
+            const modelTag = ev.model ? ` <span style="font-size: 9px; opacity: 0.5; margin-left:8px;">${ev.model}</span>` : "";
+            wrap.innerHTML = `<div class="msg-label">${roleLabel}${modelTag}</div><div class="msg-body">${ev.content}</div>`;
+            chatEl.appendChild(wrap);
+
+        } else if (ev.type === 'done') {
+            btnSend.style.display = 'flex';
+            btnStop.style.display = 'none';
+            progWrap.style.display = 'none';
+            thinkLive.style.display = 'none';
+        }
+        chatEl.scrollTop = chatEl.scrollHeight;
+    }
+
+  });
+
+  inputEl.onkeydown = e => { if(e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } };
+  document.querySelectorAll('.hint').forEach(h => h.onclick = () => { inputEl.value = h.dataset.hint; send(); });
+  vscode.postMessage({ type: 'ready' });
+</script>
+</body>
+</html>
