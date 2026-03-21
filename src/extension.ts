@@ -199,19 +199,20 @@ Response format:
 {"complexity":"Low"|"High","phases":[{"name":"<unique name>","role":"<EXACT role from list above>","dependsOn":[]}]}
 
 CRITICAL RULES:
-- "role" MUST be copied EXACTLY from the allowed roles list — no variations, no invented roles
-- "name" must be unique across all phases
-- "dependsOn" lists names of phases that must finish first ([] for start phases)
+- "role" MUST be copied EXACTLY from the allowed roles list — no variations.
+- "name" must be unique.
+- "dependsOn" lists names of phases that must finish first.
 
-IMPORTANT — SINGLE FILE RULE:
-If the entire deliverable is ONE FILE (e.g. a single .html, .py, .js), use EXACTLY this 3-phase structure:
-{"complexity":"Low","phases":[
-  {"name":"Coding","role":"Programmer","dependsOn":[]},
-  {"name":"Code Review","role":"Code Reviewer","dependsOn":["Coding"]},
-  {"name":"Documentation","role":"Technical Writer","dependsOn":["Code Review"]}
-]}
-For HTML games/apps: ONE single .html file with all CSS and JS INLINE (not separate files).
-Do NOT split into separate HTML/CSS/JS files unless the task explicitly asks for it.
+SINGLE FILE / SIMPLE TASK RULE:
+If the task is a simple game, script, or single-file app (Low complexity), use EXACTLY this 3-phase SEQUENTIAL plan:
+1. "Coding" [Programmer], dependsOn: []
+2. "Code Review" [Code Reviewer], dependsOn: ["Coding"]
+3. "Documentation" [Technical Writer], dependsOn: ["Code Review"]
+Do NOT add Architecture or other phases for simple tasks.
+
+COMPLEX TASKS:
+Split into logical parts (e.g., Backend, Frontend) only if they can truly be built independently.
+Always ensure Documentation depends on the LAST review phase.
 
 FORBIDDEN — never create phases with these names (launching is done INSIDE Coding phase):
 "Demonstration", "Demo", "Testing & Demonstration", "Test & Demo", "Launch", "Run", "Execute"
@@ -228,8 +229,8 @@ Example fullstack (two separate servers):
 ]}`;
 
     let contextForCEO = globalSessionContext;
-    if (contextForCEO.length > 1500) contextForCEO = contextForCEO.substring(contextForCEO.length - 1500);
-    const ceoUserMsg = `Task: "${idea}"${contextForCEO ? `\nContext: ${contextForCEO}` : ""}`;
+    if (contextForCEO.length > 2000) contextForCEO = contextForCEO.substring(contextForCEO.length - 2000);
+    const ceoUserMsg = `TASK: "${idea}"\n\n${contextForCEO ? `=== PREVIOUS SESSION CONTEXT ===\n${contextForCEO}` : ""}`;
 
     try {
         const analyzer = new VLLMModelBackend("Chief Executive Officer");

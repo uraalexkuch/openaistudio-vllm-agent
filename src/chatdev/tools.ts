@@ -81,21 +81,18 @@ function getWorkspaceRoot(): string {
 }
 
 /**
- * Resolves a user-supplied filename to an absolute path inside workspace/.
- * Prevents path traversal (e.g. "../../../etc/passwd").
- * Normalises forward/back slashes for cross-platform safety.
- * Returns null if the resolved path escapes the workspace root.
+ * Resolves a user-supplied filename to an absolute path.
+ * If the filename is already absolute (e.g., C:\path\to\file or /path/to/file), it returns it as is.
+ * Otherwise, it resolves it relative to the workspace directory.
+ * NOTE: Absolute paths are now allowed as per user request to enable full disk interaction.
  */
-function resolveWorkspacePath(filename: string): string | null {
-    const root      = getWorkspaceRoot();
-    // Normalise separators then resolve relative to workspace root
-    const normalised = filename.replace(/\\/g, '/').replace(/^\/+/, '');
-    const resolved   = path.resolve(root, normalised);
-    // Ensure the resolved path is actually inside workspace/
-    if (!resolved.startsWith(root + path.sep) && resolved !== root) {
-        return null; // path traversal attempt
+function resolveToolPath(filename: string): string {
+    if (path.isAbsolute(filename)) {
+        return filename;
     }
-    return resolved;
+    const root       = getWorkspaceRoot();
+    const normalised = filename.replace(/\\/g, '/').replace(/^\/+/, '');
+    return path.resolve(root, normalised);
 }
 
 export async function executeTool(toolCall: ToolCall): Promise<string> {
@@ -112,10 +109,7 @@ export async function executeTool(toolCall: ToolCall): Promise<string> {
                 const filename = String(toolCall.args.filename ?? '').trim();
                 if (!filename) return 'write_file error: "filename" argument is required.';
 
-                const filePath = resolveWorkspacePath(filename);
-                if (!filePath) {
-                    return `write_file error: filename "${filename}" attempts to escape the workspace directory.`;
-                }
+                const filePath = resolveToolPath(filename);
 
                 // FIX: create all parent directories, not just workspace root
                 fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -135,10 +129,7 @@ export async function executeTool(toolCall: ToolCall): Promise<string> {
                 const filename = String(toolCall.args.filename ?? '').trim();
                 if (!filename) return 'read_file error: "filename" argument is required.';
 
-                const filePath = resolveWorkspacePath(filename);
-                if (!filePath) {
-                    return `read_file error: filename "${filename}" attempts to escape the workspace directory.`;
-                }
+                const filePath = resolveToolPath(filename);
                 if (!fs.existsSync(filePath)) {
                     return `read_file error: "${filename}" does not exist in workspace.`;
                 }
@@ -154,13 +145,13 @@ export async function executeTool(toolCall: ToolCall): Promise<string> {
             try {
                 const root    = getWorkspaceRoot();
                 const subdir  = toolCall.args.directory ? String(toolCall.args.directory).trim() : '';
-                const dirPath = subdir ? resolveWorkspacePath(subdir) : root;
+                const dirPath = subdir ? resolveToolPath(subdir) : root;
 
                 if (!dirPath) return 'list_files error: directory escapes workspace.';
                 if (!fs.existsSync(dirPath)) return `list_files: directory "${subdir || '.'}" does not exist.`;
 
                 const entries: string[] = [];
-                function walk(dir: string, prefix: string) {
+                const walk = (dir: string, prefix: string) => {
                     for (const entry of fs.readdirSync(dir)) {
                         const full = path.join(dir, entry);
                         const rel  = prefix ? `${prefix}/${entry}` : entry;
@@ -172,7 +163,7 @@ export async function executeTool(toolCall: ToolCall): Promise<string> {
                             entries.push(`📄 ${rel} (${(size / 1024).toFixed(1)} KB)`);
                         }
                     }
-                }
+                };
                 walk(dirPath, '');
                 return entries.length
                     ? `workspace/${subdir || ''}:\n${entries.join('\n')}`
@@ -186,8 +177,7 @@ export async function executeTool(toolCall: ToolCall): Promise<string> {
             try {
                 const dirname = String(toolCall.args.directory ?? '').trim();
                 if (!dirname) return 'make_directory error: "directory" argument is required.';
-                const dirPath = resolveWorkspacePath(dirname);
-                if (!dirPath) return `make_directory error: directory escapes workspace.`;
+                const dirPath = resolveToolPath(dirname);
                 fs.mkdirSync(dirPath, { recursive: true });
                 return `Directory "${dirname}" created (path: ${dirPath}).`;
             } catch (err: any) {
@@ -221,16 +211,16 @@ export function getToolsDescription(): string {
         "TOOLS:",
         "  write_file     — Save a file (creates parent dirs automatically).",
         "                   Args: {\"filename\": \"src/components/App.tsx\", \"content\": \"...\"}",
-        "                   Nested paths supported: e.g. \"src/utils/helpers.js\"",
+        "                   Nested paths AND absolute paths (C:\\... or /...) supported.",
         "",
-        "  read_file      — Read a workspace file.",
-        "                   Args: {\"filename\": \"src/App.tsx\"}",
+        "  read_file      — Read a workspace file or an absolute path.",
+        "                   Args: {\"filename\": \"src/App.tsx\"} or {\"filename\": \"C:\\Users\\...\"}",
         "",
-        "  list_files     — List files in workspace (or subdirectory).",
-        "                   Args: {\"directory\": \"src\"}  or  {}  for root",
+        "  list_files     — List files in workspace (or any directory).",
+        "                   Args: {\"directory\": \"src\"} or {\"directory\": \"D:\\Dev\\...\"}",
         "",
-        "  make_directory — Create a directory (and parents) in workspace.",
-        "                   Args: {\"directory\": \"src/components\"}",
+        "  make_directory — Create a directory (and parents) in workspace or at absolute path.",
+        "                   Args: {\"directory\": \"src/components\"} or {\"directory\": \"/tmp/test\"}",
         "",
         "  launch_file    — Open HTML in browser, other files in VS Code.",
         "                   Args: {\"filename\": \"index.html\"}",

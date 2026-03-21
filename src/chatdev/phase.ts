@@ -101,18 +101,62 @@ export class Phase {
             originalTask = taskPrompt.substring(taskIdx + taskMarker.length).trim();
         }
 
-        // Wrap the task so the model clearly sees "THIS is what I need to do"
-        const wrappedTaskPrompt = [
-            `=== ORIGINAL USER TASK ===`,
-            originalTask,
-            `=== END OF TASK ===`,
-            ``,
-            `=== YOUR ROLE IN THIS PHASE: ${this.phaseName} ===`,
-            `Execute the task above. Do not invent a different task. Do not ask clarifying questions — proceed directly.`,
-            taskIdx !== -1 ? `\n=== CONTEXT FROM PREVIOUS PHASES ===\n${taskPrompt.substring(0, taskIdx).trim()}` : '',
-        ].filter(Boolean).join('\n');
+        // Prepare the task prompt based on the role structure
+        let promptForAssistant = "";
+        let promptForUser      = "";
 
-        let currentMessage = wrappedTaskPrompt;
+        const isReviewPhase = this.phaseName.toLowerCase().includes("review");
+        const isDocPhase    = this.phaseName.toLowerCase().includes("documentation");
+        const isWorkerPhase = !isReviewPhase && !isDocPhase;
+
+        if (isWorkerPhase) {
+            promptForAssistant = [
+                `=== ORIGINAL USER TASK ===`,
+                originalTask,
+                `=== END OF TASK ===`,
+                ``,
+                `=== YOUR ROLE IN THIS PHASE: ${this.phaseName} ===`,
+                `Execute the task above. Write code and save files as requested.`,
+                taskIdx !== -1 ? `\n=== CONTEXT FROM PREVIOUS PHASES ===\n${taskPrompt.substring(0, taskIdx).trim()}` : '',
+            ].filter(Boolean).join('\n');
+            
+            promptForUser = `Review the work done by the ${this.assistantAgent.getRoleName()}. ` +
+                           `Ensure it fulfills the task: "${originalTask}". ` +
+                           `Provide feedback or output <DONE> if complete.`;
+        } else if (isReviewPhase) {
+            promptForAssistant = [
+                `=== ORIGINAL USER TASK ===`,
+                originalTask,
+                `=== END OF TASK ===`,
+                ``,
+                `=== YOUR ROLE: ${this.assistantAgent.getRoleName()} (${this.phaseName}) ===`,
+                `Your task is to REVIEW the work produced in previous phases. ` +
+                `You MUST call read_file to check the current code state before giving feedback.`,
+                `Do NOT rewrite the whole project. Provide targeted feedback for the Programmer to fix.`,
+                taskIdx !== -1 ? `\n=== CONTEXT & SUMMARIES (previous work) ===\n${taskPrompt.substring(0, taskIdx).trim()}` : '',
+            ].filter(Boolean).join('\n');
+            
+            promptForUser = `I have completed the implementation for the task: "${originalTask}". ` +
+                           `Please review my code and provide feedback.`;
+        } else if (isDocPhase) {
+            promptForAssistant = [
+                `=== ORIGINAL USER TASK ===`,
+                originalTask,
+                `=== END OF TASK ===`,
+                ``,
+                `=== YOUR ROLE: ${this.assistantAgent.getRoleName()} (${this.phaseName}) ===`,
+                `Your task is to document the project. Do NOT write code. ` +
+                `Create a README.md based on the features and files described in the context.`,
+                taskIdx !== -1 ? `\n=== CONTEXT & SUMMARIES ===\n${taskPrompt.substring(0, taskIdx).trim()}` : '',
+            ].filter(Boolean).join('\n');
+            
+            promptForUser = `The project based on task "${originalTask}" is complete. ` +
+                           `Please write the technical documentation (README.md).`;
+        }
+
+        // Logical Flow: User Agent (CTO/Manager) starts the conversation or prompts the assistant.
+        // This restores the "logical sequence" where the assistant responds to a specific prompt.
+        let currentMessage = promptForUser || "Please proceed with the task.";
         let finalCodeOrResult = "";
 
         for (let turn = 0; turn < this.maxTurns; turn++) {
@@ -120,7 +164,8 @@ export class Phase {
 
             const assistantName  = this.assistantAgent.getRoleName();
             const assistantModel = this.assistantAgent.getModelName();
-            const actionDesc = turn === 0 ? `аналізує задачу та складає план` : `виконує підзадачу та готує відповідь`;
+            const userName       = this.userAgent.getRoleName();
+            const actionDesc     = turn === 0 ? `аналізує задачу та складає план` : `виконує підзадачу та готує відповідь`;
 
             this.onEvent?.({
                 type: 'thinking',
@@ -135,7 +180,12 @@ export class Phase {
                 model: assistantModel
             });
 
-            const assistantResponse = await this.assistantAgent.step(currentMessage, 0.2, (token) => {
+            // The very first turn: assistant gets its specific instructions + the user's opening message
+            const payload = turn === 0 
+                ? `${promptForAssistant}\n\n=== START CONVERSATION ===\n${userName}: ${currentMessage}`
+                : currentMessage;
+
+            const assistantResponse = await this.assistantAgent.step(payload, 0.2, (token) => {
                 this.onEvent?.({ type: 'answer_stream_chunk', content: token });
             });
 
@@ -165,7 +215,6 @@ export class Phase {
                 break;
             }
 
-            const userName  = this.userAgent.getRoleName();
             const userModel = this.userAgent.getModelName();
             this.onEvent?.({
                 type: 'thinking',
