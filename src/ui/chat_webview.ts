@@ -11,6 +11,7 @@ export class ChatWebview {
 
     // Track the last HTML file written by an agent so the "Open in Browser" button works
     public static lastWrittenFile: string | undefined;
+    public static lastProjectFolder: string | undefined;
 
     private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri) {
         this._panel = panel;
@@ -81,16 +82,25 @@ export class ChatWebview {
     }
 
     public broadcastEvent(event: any) {
+        const content = event.content || '';
+
+        // Відстежити папку проєкту з нарації
+        const folderMatch = content.match(/Папка проєкту: workspace\/([^\s\n]+)/);
+        if (folderMatch) {
+            ChatWebview.lastProjectFolder = folderMatch[1];
+        }
+
         // Track last written file for the "Open in Browser" button
         if (event.type === 'tool_result' || event.type === 'narration') {
-            const content = event.content || '';
             const match = content.match(/File "([^"]+\.html?)" saved successfully/i);
             if (match) {
                 ChatWebview.lastWrittenFile = match[1];
                 // Notify webview that a file is ready to open
                 this._panel.webview.postMessage({
                     type: 'file_ready',
-                    filename: ChatWebview.lastWrittenFile
+                    filename: ChatWebview.lastWrittenFile,
+                    // Показати відносний шлях у кнопці (basename)
+                    displayName: match[1].replace(/.*\//, '')
                 });
             }
         }
@@ -112,7 +122,8 @@ export class ChatWebview {
     }
 
     public notifyStart() {
-        ChatWebview.lastWrittenFile = undefined; // reset on new task
+        ChatWebview.lastWrittenFile  = undefined; // reset on new task
+        ChatWebview.lastProjectFolder = undefined;
         this._panel.webview.postMessage({ type: 'task_start' });
     }
 
@@ -138,7 +149,7 @@ window.addEventListener('message', (e) => {
             btn.onclick = () => vscode.postMessage({ type: 'open_in_browser' });
             document.body.appendChild(btn);
         }
-        btn.textContent = '🌐 Open ' + msg.filename + ' in Browser';
+        btn.textContent = '🌐 Open ' + (msg.displayName || msg.filename) + ' in Browser';
         btn.style.display = 'block';
     }
     if (msg.type === 'task_start') {

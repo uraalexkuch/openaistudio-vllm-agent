@@ -11,6 +11,8 @@ import { Phase } from './chatdev/phase';
 import { WorkspaceManager } from './chatdev/workspace';
 import { VLLMModelBackend } from './camel/model_backend';
 import { invalidateSkillsCache } from './chatdev/skills';
+import { buildProjectLayout } from './utils/project_utils';
+import { getWorkspaceRoot } from './utils/path_utils';
 
 let globalSessionContext = "";
 let isExecuting = false;
@@ -72,6 +74,37 @@ const DEFAULT_MAX_TURNS: Record<string, number> = {
 };
 function maxTurnsFor(role: string): number {
     return DEFAULT_MAX_TURNS[role] ?? 2;
+}
+
+/**
+ * Truncates text at the last sentence boundary within the limit.
+ */
+function trimToSentence(text: string, maxLen: number): string {
+    if (text.length <= maxLen) return text;
+    const truncated = text.substring(0, maxLen);
+    // Find last sentence end
+    const lastStop = Math.max(
+        truncated.lastIndexOf('. '),
+        truncated.lastIndexOf('.\n'),
+        truncated.lastIndexOf('! '),
+        truncated.lastIndexOf('? '),
+    );
+    // If we found a stop in the last 40% of the truncated text, use it.
+    // Otherwise just hard truncate to avoid losing too much info.
+    return lastStop > maxLen * 0.6
+        ? truncated.substring(0, lastStop + 1) + ' …'
+        : truncated + ' …';
+}
+
+/**
+ * Truncates context while preserving complete [...] blocks.
+ */
+function trimSessionContext(ctx: string, maxLen: number): string {
+    if (ctx.length <= maxLen) return ctx;
+    const tail = ctx.substring(ctx.length - maxLen);
+    // Find start of first full block [...]
+    const firstBlock = tail.indexOf('\n[');
+    return firstBlock > 0 ? tail.substring(firstBlock + 1) : tail;
 }
 
 // Визначає чи задача потребує фронтенд-розробника
@@ -305,6 +338,28 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
     }
     ChatWebview.currentPanel?.broadcastEvent({ type: 'narration', content: `🔌 vLLM: ${vllmUrl}` });
 
+    // 1.5. Визначити папку проєкту та створити структуру
+    const workspaceRoot = getWorkspaceRoot();
+    const layout = buildProjectLayout(idea, workspaceRoot);
+
+    // Створити структуру папок заздалегідь
+    if (!fs.existsSync(layout.projectPath)) {
+        fs.mkdirSync(layout.projectPath, { recursive: true });
+    }
+    for (const fullDirPath of layout.dirs) {
+        if (!fs.existsSync(fullDirPath)) {
+            fs.mkdirSync(fullDirPath, { recursive: true });
+        }
+    }
+
+    // Повідомити у чат та додати до промпту задачі
+    ChatWebview.currentPanel?.broadcastEvent({
+        type: 'narration',
+        content: `📁 Папка проєкту: workspace/${layout.slug}\n${layout.promptHint}`
+    });
+
+    fullExecutionPrompt = `${layout.promptHint}\n\n${fullExecutionPrompt}`;
+
     const chatChain = new ChatChain();
     chatChain.onEvent = (ev) => ChatWebview.currentPanel?.broadcastEvent(ev);
 
@@ -342,16 +397,10 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
         `IMPORTANT: Respond ONLY with a valid JSON object.`
     ].join('\n');
 
+    const CEO_CONTEXT_LIMIT = 4000;
     let contextForCEO = globalSessionContext;
-    if (contextForCEO.length > 2000) {
-        const startIdx = contextForCEO.length - 2000;
-        const nextNewline = contextForCEO.indexOf('\n', startIdx);
-        // If newline found and it's not too far (within 200 chars), use it as clean start
-        if (nextNewline !== -1 && nextNewline < startIdx + 200) {
-            contextForCEO = contextForCEO.substring(nextNewline + 1);
-        } else {
-            contextForCEO = contextForCEO.substring(startIdx);
-        }
+    if (contextForCEO.length > CEO_CONTEXT_LIMIT) {
+        contextForCEO = trimSessionContext(contextForCEO, CEO_CONTEXT_LIMIT);
     }
     const ceoUserMsg = `TASK: "${idea}"\n\n${contextForCEO ? `=== PREVIOUS SESSION CONTEXT ===\n${contextForCEO}` : ""}`;
 
@@ -499,19 +548,25 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
         const env = await chatChain.execute(fullExecutionPrompt);
 
         globalSessionContext += `\n[Користувач]: ${idea}\n`;
-        const phaseKeys = Object.keys(env);
-        if (phaseKeys.length > 0) {
-            const lastPhase = phaseKeys[phaseKeys.length - 1];
-            // Store only the summary (not raw output with file contents)
-            // to keep context compact and avoid confusing next run
-            let output = env[`${lastPhase}_summary`] || "";
-            if (output.length > 1000) output = output.substring(0, 1000) + "…";
-            if (output) globalSessionContext += `[Результат (${lastPhase})]:\n${output}\n---\n`;
+        
+        // Collect summaries from ALL phases
+        const phaseKeys = Object.keys(env).filter(k => k.endsWith('_summary'));
+        const allSummaries = phaseKeys
+            .map(k => {
+                const phaseName = k.replace('_summary', '');
+                const summary   = env[k];
+                const trimmed   = summary ? trimToSentence(summary, 600) : '';
+                return trimmed ? `[${phaseName}]: ${trimmed}` : null;
+            })
+            .filter(Boolean)
+            .join('\n\n');
+
+        if (allSummaries) {
+            globalSessionContext += `[Результат проєкту "${idea}"]:\n${allSummaries}\n---\n`;
         }
+
         // Cap total session context to prevent prompt overflow
-        if (globalSessionContext.length > 3000) {
-            globalSessionContext = globalSessionContext.substring(globalSessionContext.length - 3000);
-        }
+        globalSessionContext = trimSessionContext(globalSessionContext, 3000);
 
         ChatWebview.currentPanel?.broadcastEvent({ type: 'narration', content: "✅ Процес завершено." });
         ChatWebview.currentPanel?.broadcastEvent({ type: 'done' });
@@ -534,8 +589,17 @@ export function activate(context: vscode.ExtensionContext) {
             ChatWebview.createOrShow(context.extensionUri);
         }));
         context.subscriptions.push(vscode.commands.registerCommand('openaistudio.newTask', async () => {
+            if (globalSessionContext.trim()) {
+                const choice = await vscode.window.showWarningMessage(
+                    'Очистити контекст поточного проєкту та почати новий?',
+                    { modal: true },
+                    'Так, новий проєкт',
+                    'Ні, продовжити поточний'
+                );
+                if (choice !== 'Так, новий проєкт') return;
+            }
             globalSessionContext = "";
-            vscode.window.showInformationMessage('OpenAIStudio: Нове завдання (контекст очищено).');
+            vscode.window.showInformationMessage('OpenAIStudio: Контекст очищено. Новий проєкт.');
             ChatWebview.createOrShow(context.extensionUri);
         }));
         context.subscriptions.push(vscode.commands.registerCommand('openaistudio.startTaskFromWebview', async (idea: string) => {
