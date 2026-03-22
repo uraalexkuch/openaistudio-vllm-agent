@@ -142,6 +142,20 @@
           "type": "string",
           "default": "gemma",
           "markdownDescription": "**nginx path** для загальних ролей (Technical Writer, CPO, документація). Сервер: `gemma` → 2.123s, 16384 токенів."
+        },
+        "openaistudio.uiLanguage": {
+          "type": "string",
+          "default": "",
+          "enum": ["", "uk", "en", "de", "fr", "pl"],
+          "enumDescriptions": [
+            "Автоматично (з VS Code / задачі)",
+            "Українська",
+            "English",
+            "Deutsch",
+            "Français",
+            "Polski"
+          ],
+          "description": "Мова відповідей агентів у чаті. Порожньо = визначається автоматично."
         }
       }
     }

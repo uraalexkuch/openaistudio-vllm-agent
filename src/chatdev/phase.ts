@@ -3,6 +3,7 @@ import { ChatAgent } from "../camel/chat_agent";
 import { RoleType } from "../camel/typing";
 import { autoLoadSkillsForTask } from "./skills";
 import { getToolsDescription } from "./tools";
+import { resolveUiLanguage, buildLanguageRule, LangInfo } from '../utils/language_utils';
 
 // Phases where the assistant actively needs to write/read/launch files
 const FILE_TOOL_PHASES = new Set(["Coding", "CodeReview", "Documentation", "ArchitectureRevision"]);
@@ -14,6 +15,7 @@ export class Phase {
     private readonly maxTurns: number;
     private readonly taskComplexity: string;
     private readonly roleSkills?: string[];
+    private uiLang: LangInfo;
 
     constructor(
         phaseName: string,
@@ -24,11 +26,13 @@ export class Phase {
         maxTurns?: number,
         assistantModel?: string,
         taskComplexity: string = "High",
-        roleSkills?: string[]
+        roleSkills?: string[],
+        taskText?: string
     ) {
         this.phaseName = phaseName;
         this.taskComplexity = taskComplexity;
         this.roleSkills = roleSkills;
+        this.uiLang = resolveUiLanguage(taskText);
         this.assistantAgent = new ChatAgent(assistantRole, RoleType.ASSISTANT, assistantPrompt, this.taskComplexity, assistantModel);
         this.userAgent = new ChatAgent(userRole, RoleType.USER, userPrompt, this.taskComplexity);
         this.maxTurns = maxTurns ?? 5;
@@ -50,7 +54,18 @@ export class Phase {
             console.log(`[Phase:${this.phaseName}] Loading specific skills: ${this.roleSkills.join(', ')}`);
             // We'll try to match these names against folders in skillsPath
             const allScored = await autoLoadSkillsForTask(`${this.roleSkills.join(' ')}`, "", 10);
-            loadedSkills = allScored.filter(s => this.roleSkills?.includes(s.folderName) || this.roleSkills?.includes(s.name));
+            const currentRoleSkills = this.roleSkills;
+            loadedSkills = allScored.filter(s => {
+                const lf = s.folderName.toLowerCase();
+                const ln = s.name.toLowerCase();
+                return currentRoleSkills.some(rs => {
+                    const lrs = rs.toLowerCase();
+                    return lf === lrs ||
+                           lf.endsWith('/' + lrs) ||
+                           ln === lrs ||
+                           ln.includes(lrs);
+                });
+            });
         }
 
         if (loadedSkills.length === 0) {
@@ -86,16 +101,17 @@ export class Phase {
             );
         }
 
-        // FIX 2: Language control — agents reason in English internally but the final
-        // user-visible answer must be in Ukrainian (or whatever language the task uses).
-        this.assistantAgent.addSystemContext(
-            `LANGUAGE RULE: You may think and reason in English internally. ` +
-            `Your final response visible in the chat MUST be in Ukrainian (uk-UA) ` +
-            `unless the task explicitly uses a different language.`
-        );
-        this.userAgent.addSystemContext(
-            `LANGUAGE RULE: Your feedback and questions MUST be in Ukrainian (uk-UA).`
-        );
+        // FIX 2: Language control — agents reason in any language internally but the final
+        // user-visible answer must be in the resolved UI language.
+        const langRule = buildLanguageRule(this.uiLang);
+        this.assistantAgent.addSystemContext(langRule);
+        this.userAgent.addSystemContext(langRule);
+
+        // Narration about the resolved language
+        this.onEvent?.({
+            type: 'narration',
+            content: `🌐 Мова відповідей: ${this.uiLang.nativeLabel} (${this.uiLang.code})`
+        });
 
         // Wire onEvent so tool_call / tool_result events reach the UI
         this.assistantAgent.onEvent = (ev) => this.onEvent?.(ev);

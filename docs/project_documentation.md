@@ -50,6 +50,7 @@ This extension implements a **multi-agent software development system** inspired
 | `src/chatdev/tools.ts` | Parses `<tool_call>` XML from model output; routes to actual tools. |
 | `src/tools/delegate_to_expert.ts` | Creates isolated sub-agents for specific expertise. |
 | `src/tools/web_search.ts` | Queries Perplexica or other search API. |
+| `src/utils/language_utils.ts` | Detects language from task text and resolves UI language settings. |
 | `resources/chat.html` | The interactive frontend for agent communication. |
 | `RoleConfig.json` | Declares roles, context, and preferred skills. |
 | `workspace/` | Shared workspace folder where agents read and write files. |
@@ -121,3 +122,16 @@ To ensure a smooth user experience, all agent responses are streamed to the WebV
 - **Role Alternation:** `VLLMModelBackend` strictly enforces `user`/`assistant` role alternation to satisfy strict model requirements (Mistral 400 errors).
 - **Context Safety:** Dynamic token calculation reserves 35% of the context for output and applies safety truncation for extremely large inputs.
 - **Fail-safe Fallback:** If dynamic DAG analysis fails, the system automatically falls back to a predefined static sequential pipeline.
+
+## Multi-language Support
+
+The system dynamically determines the language for agent responses using a three-tiered priority system:
+
+1.  **Explicit Setting**: User-defined `openaistudio.uiLanguage` in VS Code settings.
+2.  **Task Detection**: Automatic detection based on the character sets (Cyrillic, Latin, etc.) used in the initial task description.
+3.  **Fallback**: VS Code's interface language (`vscode.env.language`) or English.
+
+**Language Enforcement:**
+A `LANGUAGE RULE` is injected into the system prompt of every agent. This rule informs the agent that while they can reason internally in any language, the **final response** must be in the target language. This ensures consistency across different roles in the DAG.
+
+Supported languages currently include: **Ukrainian, English, German, French, and Polish**.

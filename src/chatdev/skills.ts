@@ -143,11 +143,12 @@ function expandWithTranslations(tokens: string[]): string[] {
 }
 
 function tokenize(text: string): string[] {
+  const KEEP_SHORT = new Set(['3d', '2d', 'vr', 'ar', 'ai', 'ui', 'ux', 'ml', 'gl']);
   return text
       .toLowerCase()
       .replace(/[-_]/g, ' ')
       .split(/[\s,;:.!?()\[\]{}<>|"'`]+/)
-      .filter(w => w.length > 2 && !STOP.has(w));
+      .filter(w => (w.length > 2 || KEEP_SHORT.has(w)) && !STOP.has(w));
 }
 
 let _idfCache: { 
@@ -286,10 +287,9 @@ export function scanAndScoreAllSkillsIdf(
   const scored: SkillMeta[] = [];
 
   for (const filePath of files) {
-    const folderName = path.relative(skillsPath, path.dirname(filePath)).replace(/\\/g, '/');
-    if (alreadyLoaded.has(folderName)) continue;
-
     const meta = buildSkillMeta(filePath, skillsPath);
+    if (alreadyLoaded.has(meta.folderName)) continue;
+
     meta.score = scoreSkillIdf(meta, taskTokens, contextTokens, idf);
     if (meta.score >= minScore) scored.push(meta);
   }
@@ -313,7 +313,15 @@ export function loadTopSkills(scored: SkillMeta[], maxSkills: number): LoadedSki
 }
 
 function buildSkillMeta(filePath: string, skillsPath: string): SkillMeta {
-  const folderName = path.relative(skillsPath, path.dirname(filePath)).replace(/\\/g, '/');
+  const rawRelative = path.relative(skillsPath, path.dirname(filePath)).replace(/\\/g, '/');
+
+  // FIX: strip container dir if no SKILL.md is inside it directly
+  const segments = rawRelative.split('/');
+  const CONTAINER_DIRS = new Set(['skills', 'skill', 'content', 'categories', 'topics']);
+  const folderName = (segments.length > 1 && CONTAINER_DIRS.has(segments[0].toLowerCase()))
+      ? segments.slice(1).join('/')
+      : rawRelative;
+
   const yaml = readFrontmatter(filePath);
 
   if (yaml) {

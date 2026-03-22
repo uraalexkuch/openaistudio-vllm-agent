@@ -462,7 +462,8 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
                     step.maxTurns,
                     assistantDetail.model,
                     currentTaskComplexity,
-                    assistantDetail.skills
+                    assistantDetail.skills,
+                    idea          // ← передаємо оригінальний текст задачі
                 ),
                 step.dependsOn
             );
@@ -482,7 +483,8 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
                 maxTurnsFor(p.role),
                 assistantDetail.model,
                 currentTaskComplexity,
-                assistantDetail.skills
+                assistantDetail.skills,
+                idea          // ← передаємо оригінальний текст задачі
             );
             chatChain.addPhase(phase, p.dependsOn);
         }
