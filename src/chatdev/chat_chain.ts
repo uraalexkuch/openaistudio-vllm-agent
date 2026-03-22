@@ -24,11 +24,11 @@ export class ChatChain {
     }
 
     // ── SummaryAgent ─────────────────────────────────────────────────────────
-    private async summarise(phaseName: string, rawResult: string): Promise<string> {
+    private async summarise(phaseName: string, rawResult: string, taskPrompt?: string): Promise<string> {
         if (rawResult.length < 400) return rawResult;
         try {
             const summariser = new VLLMModelBackend("Chief Product Officer");
-            const langRule = buildLanguageRule(resolveUiLanguage());
+            const langRule = buildLanguageRule(resolveUiLanguage(taskPrompt));
             const prompt = [
                 `You are a technical summariser. Summarise the "${phaseName}" phase output below.`,
                 `Max 200 words. Cover: key decisions, files created/modified (exact names), TODOs, what next phase needs.`,
@@ -110,7 +110,7 @@ export class ChatChain {
                 try { this.memory.saveMemory(logPath); } catch {}
 
                 this.onEvent?.({ type: "narration", content: `📝 Підсумовую фазу: ${phase.phaseName}…` });
-                const summary = await this.summarise(phase.phaseName, rawResult);
+                const summary = await this.summarise(phase.phaseName, rawResult, taskPrompt);
 
                 completedSummaries[phase.phaseName] = summary;
                 this.chatEnv[`${phase.phaseName}_output`]  = rawResult;

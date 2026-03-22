@@ -56,8 +56,20 @@ export class ChatAgent {
         // Each tool call is executed, result injected, and model called again.
         // Loop continues until model produces a response with no tool call.
         let toolCall = parseToolCall(responseText);
+        const MAX_TOOL_ITERATIONS = 10;
+        let toolIterations = 0;
 
-        while (toolCall) {
+        while (toolCall && toolIterations < MAX_TOOL_ITERATIONS) {
+            toolIterations++;
+
+            if (toolIterations >= MAX_TOOL_ITERATIONS) {
+                this.onEvent?.({
+                    type: 'narration',
+                    content: `⚠️ Tool loop limit (${MAX_TOOL_ITERATIONS}) reached — stopping to prevent infinite loop.`
+                });
+                break;
+            }
+
             const toolName = toolCall.name;
             const toolArgs = toolCall.args;
 

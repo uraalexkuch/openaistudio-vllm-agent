@@ -22,8 +22,20 @@ export function resolveToolPath(filename: string, readOnly = false): string {
         if (readOnly) return filename; // читання — без обмежень
         const root = getWorkspaceRoot();
         const home = os.homedir();
-        if (!filename.startsWith(home) && !filename.startsWith(root)) {
-            throw new Error(`Write outside home/workspace blocked: ${filename}`);
+        // Дозволені префікси для запису
+        const WRITE_ALLOWED = [
+            home,
+            root,
+            // Linux серверні шляхи
+            '/var/www',
+            '/opt',
+            '/srv',
+            '/home',
+        ];
+
+        const isAllowed = WRITE_ALLOWED.some(p => filename.startsWith(p));
+        if (!isAllowed) {
+            throw new Error(`Write outside allowed paths blocked: ${filename}`);
         }
         return filename;
     }

@@ -9,12 +9,13 @@ export interface TaskContext {
 
 const EXPLAIN_KEYWORDS = [
     'поясни','explain','розбери','analyze','аналізуй','опиши',
-    'describe','review','перевір','what is','що це','як влаштован',
+    'describe','what is','що це','як влаштован',
     'покажи структуру','show structure','розкажи про',
 ];
 const FIX_KEYWORDS = [
     'виправ','fix','debug','дебаг','знайди баги','find bugs',
     'полагодь','repair','виправи помилки',
+    'перевір','code review','зроби review','зроби code review',
 ];
 const REFACTOR_KEYWORDS = [
     'рефактор','refactor','покращ','improve','оптимізуй','optimize',
@@ -80,8 +81,17 @@ export function detectTaskIntent(
     } else if (EXPLAIN_KEYWORDS.some(kw => lower.includes(kw)))   intent = 'explain';
     else if (FIX_KEYWORDS.some(kw => lower.includes(kw)))         intent = 'fix';
     else if (REFACTOR_KEYWORDS.some(kw => lower.includes(kw)))    intent = 'refactor';
-    else if (ADD_KEYWORDS.some(kw => lower.includes(kw)) && (sourcePath || currentProjectPath))
-                                                                   intent = 'add_feature';
+    else if (ADD_KEYWORDS.some(kw => lower.includes(kw)) && (sourcePath || currentProjectPath)) {
+        const mentionsExisting = [
+            'existing','до поточного','до проєкту','in the project',
+            'this codebase','до цього','в проєкт','у проєкт',
+            'в існуючий','to the existing',
+        ].some(kw => lower.includes(kw));
+        
+        if (mentionsExisting || sourcePath) {
+            intent = 'add_feature';
+        }
+    }
 
     // Якщо є шлях, але немає явного наміру "створити" — ймовірно, це аналіз
     if (sourcePath && intent === 'create') {
@@ -99,7 +109,7 @@ export function detectTaskIntent(
 
     // Очистити опис від шляху, щоб не плутати агентів
     const description = sourcePath
-        ? idea.replace(sourcePath, '').replace(/["']/g, '').trim()
+        ? idea.replace(sourcePath, '').replace(/["']/g, '').trim() || idea
         : idea;
 
     return { intent, sourcePath, useCurrentProject, description };

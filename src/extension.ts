@@ -427,7 +427,8 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
     interface DagPhase { name: string; role: string; dependsOn: string[]; }
     let dagPhases: DagPhase[] = [];
 
-    const availableRoles = Object.keys(roleConfig).join(', ');
+    const rolesObj = (roleConfig as any).roles ?? roleConfig;
+    const availableRoles = Object.keys(rolesObj).join(', ');
 
     const ceoSystemPrompt = taskCtx.intent === 'create'
         ? buildCreationCeoPrompt(idea, availableRoles)
@@ -468,7 +469,8 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
         // FIX Bug #1: support both 'plan' and 'phases'
         const rawPlan = parsed.plan ?? parsed.phases;
         if (Array.isArray(rawPlan) && rawPlan.length > 0) {
-            const knownRoles = new Set(Object.keys(roleConfig));
+            const rolesObj = (roleConfig as any).roles ?? roleConfig;
+            const knownRoles = new Set(Object.keys(rolesObj));
 
             // FIX: remap unknown/hallucinated roles to nearest known role
             dagPhases = rawPlan
@@ -577,26 +579,27 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
         }
     }
 
-    try {
-        const env = await chatChain.execute(fullExecutionPrompt);
-
-        globalSessionContext += `\n[Користувач]: ${idea}\n`;
-        
-        // Collect summaries from ALL phases
-        const phaseKeys = Object.keys(env).filter(k => k.endsWith('_summary'));
-        const allSummaries = phaseKeys
-            .map(k => {
-                const phaseName = k.replace('_summary', '');
-                const summary   = env[k];
-                const trimmed   = summary ? trimToSentence(summary, 600) : '';
-                return trimmed ? `[${phaseName}]: ${trimmed}` : null;
-            })
-            .filter(Boolean)
-            .join('\n\n');
-
-        if (allSummaries) {
-            globalSessionContext += `[Результат проєкту "${idea}"]:\n${allSummaries}\n---\n`;
-        }
+        try {
+            const env = await chatChain.execute(fullExecutionPrompt);
+    
+            // Тільки для create зберігаємо в сесію
+            if (taskCtx.intent === 'create') {
+                globalSessionContext += `\n[Користувач]: ${idea}\n`;
+                const phaseKeys = Object.keys(env).filter(k => k.endsWith('_summary'));
+                const allSummaries = phaseKeys
+                    .map(k => {
+                        const phaseName = k.replace('_summary', '');
+                        const summary   = env[k];
+                        const trimmed   = summary ? trimToSentence(summary, 600) : '';
+                        return trimmed ? `[${phaseName}]: ${trimmed}` : null;
+                    })
+                    .filter(Boolean)
+                    .join('\n\n');
+                if (allSummaries) {
+                    globalSessionContext += `[Результат "${idea}"]:\n${allSummaries}\n---\n`;
+                }
+                globalSessionContext = trimSessionContext(globalSessionContext, 3000);
+            }
 
         // Cap total session context to prevent prompt overflow
         globalSessionContext = trimSessionContext(globalSessionContext, 3000);

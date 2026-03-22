@@ -186,9 +186,15 @@ export class Phase {
         let promptForAssistant = "";
         let promptForUser      = "";
 
-        const isReviewPhase = this.phaseName.toLowerCase().includes("review");
-        const isDocPhase    = this.phaseName.toLowerCase().includes("documentation");
-        const isWorkerPhase = !isReviewPhase && !isDocPhase;
+        const isAnalystPhase = 
+            this.phaseName.toLowerCase().includes('analys') ||
+            this.phaseName.toLowerCase().includes('exploration') ||
+            this.phaseName.toLowerCase().includes('explore') ||
+            this.assistantAgent.getRoleName().toLowerCase().includes('analyst');
+
+        const isReviewPhase  = this.phaseName.toLowerCase().includes("review");
+        const isDocPhase     = this.phaseName.toLowerCase().includes("documentation");
+        const isWorkerPhase  = !isReviewPhase && !isDocPhase && !isAnalystPhase;
 
         if (isWorkerPhase) {
             promptForAssistant = [
@@ -205,6 +211,23 @@ export class Phase {
             promptForUser = `Review the work done by the ${this.assistantAgent.getRoleName()}. ` +
                            `Ensure it fulfills the task: "${originalTask}". ` +
                            `Provide feedback or output <DONE> if complete.`;
+        } else if (isAnalystPhase) {
+            promptForAssistant = [
+                `=== ORIGINAL USER TASK ===`,
+                originalTask,
+                `=== END OF TASK ===`,
+                ``,
+                `=== YOUR ROLE: ${this.assistantAgent.getRoleName()} (${this.phaseName}) ===`,
+                `Explore and understand the existing project thoroughly.`,
+                `Use ONLY list_files and read_file tools.`,
+                `FORBIDDEN: write_file, make_directory, launch_file, execute_bash.`,
+                taskIdx !== -1 
+                    ? `\n=== CONTEXT ===\n${taskPrompt.substring(0, taskIdx).trim()}` 
+                    : '',
+            ].filter(Boolean).join('\n');
+
+            promptForUser = `Review the analysis from ${this.assistantAgent.getRoleName()}. ` +
+                           `Output <DONE> when the analysis is complete and sufficient.`;
         } else if (isReviewPhase) {
             promptForAssistant = [
                 `=== ORIGINAL USER TASK ===`,
