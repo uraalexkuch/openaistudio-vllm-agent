@@ -105,6 +105,27 @@ export function parseToolCall(responseText: string): ToolCall | null {
         }
     }
 
+    // Strategy 6: bare JSON {"name": "list_files", "arguments": {...}}
+    const jsonFmtRe = /\{\s*"name"\s*:\s*"([^"]+)"\s*,\s*"(?:arguments|args)"\s*:\s*(\{[\s\S]*?\})\s*\}/;
+    const s6 = responseText.match(jsonFmtRe);
+    if (s6) {
+        const name = s6[1].trim();
+        if (KNOWN_TOOL_NAMES.split('|').includes(name)) {
+            try { return { name, args: JSON.parse(s6[2]) }; } catch {}
+        }
+    }
+
+    // Strategy 7: ```tool_code { "name": "...", "arguments": {...} } ```
+    const toolCodeJson = responseText.match(/```(?:tool_code|tool|json)?\s*(\{[\s\S]*?"name"[\s\S]*?\})\s*```/i);
+    if (toolCodeJson) {
+        try {
+            const obj = JSON.parse(toolCodeJson[1]);
+            const name = String(obj.name ?? obj.tool ?? '').trim();
+            const args = obj.arguments ?? obj.args ?? {};
+            if (name && KNOWN_TOOL_NAMES.split('|').includes(name)) return { name, args };
+        } catch {}
+    }
+
     return null;
 }
 
@@ -271,8 +292,12 @@ export function getToolsDescription(): string {
         "3. NEVER print file content in markdown when filename was specified.",
         "4. One tool call per turn — wait for <tool_result> before the next.",
         "5. After launching, append <DONE> to complete the phase.",
-        "6. CRITICAL: NEVER use Python, bash scripts, or ```tool_code``` blocks.",
-        "7. ONLY use the XML <tool_call> format shown above.",
-        "8. Python os.makedirs(), open(), write() — FORBIDDEN. Use write_file tool instead.",
+        "6. CRITICAL FORMAT RULES:",
+        "7. NEVER use: ```tool_code {\"name\": \"list_files\", \"arguments\": {...}}```",
+        "8. NEVER use: {\"name\": \"list_files\", \"arguments\": {...}}",
+        "9. ALWAYS use ONLY this XML format:",
+        "   <tool_call><n>list_files</n><args>{\"directory\": \"...\"}</args></tool_call>",
+        "10. Any other format will be IGNORED and the task will fail.",
+        "11. Python os.makedirs(), open(), write() — FORBIDDEN. Use write_file tool instead.",
     ].join("\n");
 }

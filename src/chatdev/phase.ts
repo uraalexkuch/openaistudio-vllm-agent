@@ -107,14 +107,28 @@ export class Phase {
             this.phaseName.toLowerCase().includes("review") ||
             this.phaseName.toLowerCase().includes("document");
 
+        const isAnalystPhase = 
+            this.phaseName.toLowerCase().includes('analys') ||
+            this.assistantAgent.getRoleName().toLowerCase().includes('analyst') ||
+            this.phaseName.toLowerCase().includes('exploration') ||
+            this.phaseName.toLowerCase().includes('explore');
+
         if (needsTools) {
             this.assistantAgent.addSystemContext(getToolsDescription());
-            // userAgent gets a brief reminder NOT to execute tools
-            this.userAgent.addSystemContext(
-                `IMPORTANT: You are a reviewer. Do NOT call any tools yourself. ` +
-                `Do NOT write <tool_call> or <tool_result> tags. ` +
-                `Only read the assistant's output and provide feedback or output <DONE>.`
-            );
+            
+            // Для аналіз-фаз userAgent НЕ отримує tool descriptions взагалі
+            if (!isAnalystPhase) {
+                this.userAgent.addSystemContext(
+                    `IMPORTANT: You are a reviewer. Do NOT call any tools. ` +
+                    `Do NOT write <tool_call>, <tool_code> or JSON. ` +
+                    `Only read the assistant's output and output <DONE>.`
+                );
+            } else {
+                this.userAgent.addSystemContext(
+                    `You are reviewing the analysis. Do NOT call tools of any kind. ` +
+                    `Output <DONE> when project analysis is complete.`
+                );
+            }
         }
 
         // SKILL INJECTION SECOND
@@ -185,12 +199,6 @@ export class Phase {
         // Prepare the task prompt based on the role structure
         let promptForAssistant = "";
         let promptForUser      = "";
-
-        const isAnalystPhase = 
-            this.phaseName.toLowerCase().includes('analys') ||
-            this.phaseName.toLowerCase().includes('exploration') ||
-            this.phaseName.toLowerCase().includes('explore') ||
-            this.assistantAgent.getRoleName().toLowerCase().includes('analyst');
 
         const isReviewPhase  = this.phaseName.toLowerCase().includes("review");
         const isDocPhase     = this.phaseName.toLowerCase().includes("documentation");

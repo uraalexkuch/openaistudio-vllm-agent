@@ -73,6 +73,8 @@ const DEFAULT_MAX_TURNS: Record<string, number> = {
     "Code Reviewer":      4,
     "Programmer":         3,
     "Frontend Developer": 3,
+    "Project Analyst":    4,
+    "Technical Writer":   2,
 };
 function maxTurnsFor(role: string): number {
     return DEFAULT_MAX_TURNS[role] ?? 2;
@@ -900,29 +902,42 @@ function buildAnalysisCeoPrompt(
     taskCtx: ReturnType<typeof detectTaskIntent>,
     roles: string
 ): string {
-    const phaseGuide = taskCtx.intent === 'document'
-        ? `Build a documentation DAG:
-           - "Project Analyst" → reads and understands the project
-           - "Technical Writer" × N → writes each documentation section
-           Save all .md files to the actual project path, NOT workspace/`
-        : `Build an analysis DAG using Project Analyst, Code Reviewer etc.`;
-
+    const docGuide = taskCtx.intent === 'document' ? `
+CRITICAL DAG RULES for documentation:
+1. dependsOn values MUST be phase NAMES (not role names)
+2. "Cyber Security Specialist", "Code Reviewer" etc are ROLES, not phases
+3. CORRECT: {"name":"API Docs","role":"Technical Writer","dependsOn":["Project Analysis"]}
+4. WRONG:   {"name":"API Docs","role":"Technical Writer","dependsOn":["Project Analysis","Cyber Security Specialist"]}
+5. Keep it simple: ONE Project Analyst phase (Project Analysis), then Technical Writer phases in parallel
+6. Maximum 4-5 documentation sections to avoid parallel overload
+` : 'Build an analysis DAG. First phase MUST be "Project Analysis" (Project Analyst role) to read the code.';
+    
     return [
         `TASK: "${idea}"`,
         `Intent: ${taskCtx.intent} existing project`,
-        taskCtx.sourcePath ? `Source path: ${taskCtx.sourcePath}` : '',
+        taskCtx.sourcePath ? `Source: ${taskCtx.sourcePath}` : '',
         `Available roles: ${roles}`,
         ``,
-        phaseGuide,
+        docGuide,
         ``,
-        `Return ONLY valid JSON:`,
+        `Return ONLY valid JSON block:`,
         `{`,
         `  "estimated_operations": <int>,`,
-        `  "complexity": "Micro"|"Standard"|"Full",`,
-        `  "plan": [{"name": "...", "role": "...", "dependsOn": [...]}]`,
+        `  "complexity": "Micro" | "Standard" | "Full",`,
+        `  "has_frontend": <boolean>,`,
+        `  "has_backend": <boolean>,`,
+        `  "plan": [`,
+        `    {"name": "Project Analysis", "role": "Project Analyst", "dependsOn": []},`,
+        `    {"name": "...", "role": "...", "dependsOn": ["Project Analysis"]}`,
+        `  ]`,
         `}`,
-        `IMPORTANT: ${taskCtx.intent === 'document' ? 'ONLY .md files are allowed to be written.' : 'Do NOT include write_file or file creation phases.'}`,
-        `Focus on ${taskCtx.intent === 'document' ? 'understanding and documenting' : 'READ and ANALYZE'} operations.`,
+        ``,
+        `CRITICAL:`,
+        taskCtx.intent === 'document' 
+            ? `- ONLY write_file for .md files allowed.`
+            : `- Do NOT include write_file or code creation phases. Only research tools (list_files, read_file).`,
+        `- Role "Project Analyst" is MANDATORY as the first step to read the codebase.`,
+        `- NEVER use <tool_code> or JSON formatting in the DAG plan response itself.`,
     ].filter(Boolean).join('\n');
 }
 

@@ -29,9 +29,17 @@ export class ChatChain {
         try {
             const summariser = new VLLMModelBackend("Chief Product Officer");
             const langRule = buildLanguageRule(resolveUiLanguage(taskPrompt));
+            
+            // Для Project Analyst — зберігати конкретні шляхи файлів
+            const isAnalystPhase = phaseName.toLowerCase().includes('analys') || 
+                                   phaseName.toLowerCase().includes('understanding');
+            const extraInstruction = isAnalystPhase 
+                ? `IMPORTANT: Include ALL file paths found (exact paths like d:\\project\\src\\file.ts). Next phases need these paths to work.`
+                : `Cover: key decisions, files created/modified (exact names), TODOs.`;
+
             const prompt = [
-                `You are a technical summariser. Summarise the "${phaseName}" phase output below.`,
-                `Max 200 words. Cover: key decisions, files created/modified (exact names), TODOs, what next phase needs.`,
+                `Summarise the "${phaseName}" phase. Max 300 words.`,
+                extraInstruction,
                 `Output ONLY the summary — no preamble, no markdown fences.`,
                 langRule,
                 ``,
