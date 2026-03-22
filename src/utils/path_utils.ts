@@ -16,24 +16,18 @@ export function getWorkspaceRoot(): string {
  * Otherwise, it resolves it relative to the workspace directory.
  * NOTE: Absolute paths are allowed to enable full disk interaction as requested by the user.
  */
-export function resolveToolPath(filename: string, readOnly: boolean = false): string {
+export function resolveToolPath(filename: string, readOnly = false): string {
     if (!filename) return getWorkspaceRoot();
-    
-    // Check if it's already an absolute path
     if (path.isAbsolute(filename)) {
-        if (readOnly) return filename;
-
+        if (readOnly) return filename; // читання — без обмежень
         const root = getWorkspaceRoot();
         const home = os.homedir();
-        // Allow ONLY paths inside home or workspace
         if (!filename.startsWith(home) && !filename.startsWith(root)) {
-            throw new Error(`Absolute path outside user home or workspace blocked: ${filename}`);
+            throw new Error(`Write outside home/workspace blocked: ${filename}`);
         }
         return filename;
     }
-    
     const root = getWorkspaceRoot();
-    // Normalise separators and resolve relative to workspace root
     const normalised = filename.replace(/\\/g, '/').replace(/^\/+/, '');
     return path.resolve(root, normalised);
 }

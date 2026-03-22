@@ -50,7 +50,8 @@ This extension implements a **multi-agent software development system** inspired
 | `src/chatdev/tools.ts` | Parses `<tool_call>` XML from model output; routes to actual tools. |
 | `src/tools/delegate_to_expert.ts` | Creates isolated sub-agents for specific expertise. |
 | `src/tools/web_search.ts` | Queries Perplexica or other search API. |
-| `src/utils/language_utils.ts` | Detects language from task text and resolves UI language settings. |
+| `src/utils/task_intent.ts` | Detects user intent (create vs analyze) and extracts paths. |
+| `src/utils/path_utils.ts` | Resolves paths with optional `readOnly` safety bypass for analysis. |
 | `resources/chat.html` | The interactive frontend for agent communication. |
 | `RoleConfig.json` | Declares roles, context, and preferred skills. |
 | `workspace/` | Shared workspace folder where agents read and write files. |
@@ -64,8 +65,14 @@ The system intercepts the task execution (`extension.ts`) before building the `C
 1. **DAG Graph:** A JSON structure of phases with their roles and `dependsOn` arrays.
 2. **Complexity:** `"Low"` or `"High"`.
 
-**Parallel Execution:**
-The `ChatChain` orchestrator (`chat_chain.ts`) parses this graph and identifies phases whose dependencies are met. It uses `Promise.all` to launch independent phases simultaneously, drastically reducing the total execution time for complex projects.
+## Project Analysis & Maintenance Mode
+
+The system intelligently differentiates between creating new projects and analyzing existing ones.
+
+1. **Intent Detection**: `task_intent.ts` identifies keywords like "explain", "fix", or "refactor". 
+2. **Workspace Context**: If a folder is open in VS Code, its metadata (path, stack, key files) is automatically gathered by `WorkspaceManager` and provided to the agent.
+3. **External Paths**: Absolute paths provided in the task (e.g., `D:\project`) are prioritized and extracted.
+4. **Project Analyst Role**: A specialized read-only role that uses `list_files` and `read_file` to explore existing codebases without making changes.
 
 ## Intelligent Technical Summarization
 
@@ -114,6 +121,7 @@ To ensure a smooth user experience, all agent responses are streamed to the WebV
 | **CEO / Router** | `gemma` | `gemma` | High context (16k) for complex DAG analysis and routing. |
 | **Summarizer (CPO)** | `gemma` | `gemma` | Professional summarization and state management. |
 | **Programmer / CTO** | `codestral` | `qwen3-coder` | Specialized coding models with 32k context. |
+| **Project Analyst** | `gemma` | `gemma` | Read-only exploration and understanding. |
 | **Reviewer / QA / Test** | `qwen3-coder` | `qwen3-coder` | Fast (0.7s) logic verification. |
 | **Others (Writer)** | `gemma` | `gemma` | General purpose documentation. |
 
