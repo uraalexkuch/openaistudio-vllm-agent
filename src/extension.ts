@@ -13,6 +13,7 @@ import { VLLMModelBackend } from './camel/model_backend';
 import { invalidateSkillsCache } from './chatdev/skills';
 import { buildProjectLayout } from './utils/project_utils';
 import { getWorkspaceRoot } from './utils/path_utils';
+import { detectTaskIntent, TaskIntent } from './utils/task_intent';
 
 let globalSessionContext = "";
 let isExecuting = false;
@@ -326,42 +327,77 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
     ChatWebview.createOrShow(context.extensionUri);
     ChatWebview.currentPanel?.notifyStart();
 
+    // Отримати контекст відкритого проєкту
+    const wsManager = new WorkspaceManager(context);
+    const currentProject = wsManager.gatherProjectContext();
+
     // FIX Bug #2: reset ПІСЛЯ CEO, не до. (Safe fallback default)
     currentTaskComplexity = "Low";
 
-    let fullExecutionPrompt = idea;
+    const taskCtx = detectTaskIntent(idea, currentProject.rootPath);
+    const workspaceRoot = getWorkspaceRoot();
+
+    let fullExecutionPrompt = taskCtx.description;
     if (globalSessionContext) {
-        fullExecutionPrompt = `Історія попередніх сесій:\n${globalSessionContext}\nНове завдання: ${idea}`;
+        fullExecutionPrompt = `Історія попередніх сесій:\n${globalSessionContext}\nНове завдання: ${taskCtx.description}`;
         ChatWebview.currentPanel?.broadcastEvent({ type: 'narration', content: `🔄 Продовження роботи над проектом` });
     } else {
-        ChatWebview.currentPanel?.broadcastEvent({ type: 'narration', content: `🚀 Запуск проєкту: ${idea}` });
+        ChatWebview.currentPanel?.broadcastEvent({ type: 'narration', content: `🚀 Запуск проєкту: ${taskCtx.description}` });
     }
     ChatWebview.currentPanel?.broadcastEvent({ type: 'narration', content: `🔌 vLLM: ${vllmUrl}` });
 
-    // 1.5. Визначити папку проєкту та створити структуру
-    const workspaceRoot = getWorkspaceRoot();
-    const layout = buildProjectLayout(idea, workspaceRoot);
+    // ── РЕЖИМ: Аналіз / Maintenance ──────────────────────────────────────────
+    if (taskCtx.intent !== 'create') {
+        const targetPath = taskCtx.sourcePath ?? (taskCtx.useCurrentProject ? currentProject.rootPath : null);
 
-    // Створити структуру папок заздалегідь
-    if (!fs.existsSync(layout.projectPath)) {
-        fs.mkdirSync(layout.projectPath, { recursive: true });
-    }
-    for (const fullDirPath of layout.dirs) {
-        if (!fs.existsSync(fullDirPath)) {
-            fs.mkdirSync(fullDirPath, { recursive: true });
+        if (taskCtx.useCurrentProject && !taskCtx.sourcePath) {
+            ChatWebview.currentPanel?.broadcastEvent({
+                type: 'narration',
+                content: `📂 Аналізую поточний проєкт: ${currentProject.projectName}\n`
+                       + `📍 Шлях: ${currentProject.rootPath}\n`
+                       + `🔧 Стек: ${currentProject.stack}`
+            });
+        } else if (taskCtx.sourcePath) {
+            ChatWebview.currentPanel?.broadcastEvent({
+                type: 'narration',
+                content: `🔍 Режим: ${intentLabel(taskCtx.intent)} існуючого проєкту`
+                       + `\n📂 Шлях: ${taskCtx.sourcePath}`
+            });
+        } else {
+            ChatWebview.currentPanel?.broadcastEvent({
+                type: 'narration',
+                content: `⚠️ Шлях до проєкту не знайдено. Відкрийте папку проєкту у VS Code або вкажіть шлях.`
+            });
         }
+
+        const analysisContext = buildAnalysisContext(taskCtx, targetPath, currentProject);
+        fullExecutionPrompt = `${analysisContext}\n\n${fullExecutionPrompt}`;
+
+    // ── РЕЖИМ: Створення нового ──────────────────────────────────────────────
+    } else {
+        const layout = buildProjectLayout(idea, workspaceRoot);
+
+        // Створити структуру папок заздалегідь
+        if (!fs.existsSync(layout.projectPath)) {
+            fs.mkdirSync(layout.projectPath, { recursive: true });
+        }
+        for (const fullDirPath of layout.dirs) {
+            if (!fs.existsSync(fullDirPath)) {
+                fs.mkdirSync(fullDirPath, { recursive: true });
+            }
+        }
+
+        // Повідомити у чат та додати до промпту задачі
+        const forcedStack = config.get<string>('forceStack', '');
+        const stackSource = forcedStack ? '(вручну)' : '(автовизначено)';
+
+        ChatWebview.currentPanel?.broadcastEvent({
+            type: 'narration',
+            content: `📁 Стек: ${layout.stack.toUpperCase()} ${stackSource} | Папка: workspace/${layout.slug}/`
+        });
+
+        fullExecutionPrompt = `${layout.promptHint}\n\n${fullExecutionPrompt}`;
     }
-
-    // Повідомити у чат та додати до промпту задачі
-    const forcedStack = config.get<string>('forceStack', '');
-    const stackSource = forcedStack ? '(вручну)' : '(автовизначено)';
-
-    ChatWebview.currentPanel?.broadcastEvent({
-        type: 'narration',
-        content: `📁 Стек: ${layout.stack.toUpperCase()} ${stackSource} | Папка: workspace/${layout.slug}/`
-    });
-
-    fullExecutionPrompt = `${layout.promptHint}\n\n${fullExecutionPrompt}`;
 
     const chatChain = new ChatChain();
     chatChain.onEvent = (ev) => ChatWebview.currentPanel?.broadcastEvent(ev);
@@ -379,26 +415,11 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
     interface DagPhase { name: string; role: string; dependsOn: string[]; }
     let dagPhases: DagPhase[] = [];
 
-    // FIX Bug #3: roles in quotes so model copies them exactly; stronger enforcement
     const availableRoles = Object.keys(roleConfig).join(', ');
 
-    const ceoSystemPrompt = [
-        `TASK: "${idea}"`,
-        `Available roles: ${availableRoles}`,
-        ``,
-        `Analyze the task and return ONLY valid JSON with these fields:`,
-        `- estimated_operations: integer (count of distinct dev operations)`,
-        `- justification: string (one sentence explaining the count)`,
-        `- complexity: "Micro" | "Standard" | "Full"`,
-        `  * Micro  = 1-3 ops  (single file, script, simple game)`,
-        `  * Standard = 4-7 ops  (REST API, small app with DB)`,
-        `  * Full  = 8+ ops  (platform, microservices, complex SaaS)`,
-        `- has_frontend: boolean (does task need UI/HTML/CSS work?)`,
-        `- has_backend: boolean (does task need server/API work?)`,
-        `- plan: array of phases, each: { name, role, dependsOn: string[] }`,
-        `  Use ONLY roles from the Available roles list above.`,
-        `IMPORTANT: Respond ONLY with a valid JSON object.`
-    ].join('\n');
+    const ceoSystemPrompt = taskCtx.intent === 'create'
+        ? buildCreationCeoPrompt(idea, availableRoles)
+        : buildAnalysisCeoPrompt(idea, taskCtx, availableRoles);
 
     const CEO_CONTEXT_LIMIT = 4000;
     let contextForCEO = globalSessionContext;
@@ -764,6 +785,113 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showErrorMessage(`Помилка активації OpenAIStudio: ${error.message}`);
         console.error('Activation error:', error);
     }
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function intentLabel(intent: TaskIntent): string {
+    const labels: Record<TaskIntent, string> = {
+        explain:     'Аналіз',
+        fix:         'Виправлення',
+        refactor:    'Рефакторинг',
+        add_feature: 'Додавання функціоналу',
+        create:      'Створення',
+    };
+    return labels[intent];
+}
+
+function buildAnalysisContext(
+    taskCtx:        ReturnType<typeof detectTaskIntent>,
+    targetPath:     string | null,
+    currentProject: ReturnType<WorkspaceManager['gatherProjectContext']>
+): string {
+
+    if (!targetPath) {
+        return [
+            `═══ ANALYSIS TASK — NO PATH ═══`,
+            `Intent: ${taskCtx.intent}`,
+            `No project path found. Tell the user to:`,
+            `  1. Open the project folder in VS Code (File → Open Folder)`,
+            `  2. Or specify the path explicitly in the task`,
+            `═════════════════════════════════`,
+        ].join('\n');
+    }
+
+    const isCurrentProject = taskCtx.useCurrentProject;
+    const projectInfo = isCurrentProject
+        ? `\nKnown info:\n${currentProject.contextText}`
+        : '';
+
+    // Windows paths escaping
+    const escapedSp = targetPath.replace(/\\/g, '\\\\');
+
+    return [
+        `═══ EXISTING PROJECT ANALYSIS ═══`,
+        `Intent:  ${taskCtx.intent}`,
+        `Path:    ${targetPath}`,
+        isCurrentProject ? `Source:  currently open in VS Code` : '',
+        projectInfo,
+        ``,
+        `MANDATORY WORKFLOW:`,
+        `1. Start with: list_files → {"directory": "${escapedSp}"}`,
+        `2. Read key files: read_file → {"filename": "${escapedSp}/package.json"}`,
+        `   (or Cargo.toml, requirements.txt, go.mod etc.)`,
+        `3. Read main entry file based on detected stack`,
+        `4. Read src/ or app/ directory structure`,
+        `5. Then analyze and explain/fix/refactor as requested`,
+        ``,
+        `FORBIDDEN: creating new files, running write_file,`,
+        `changing the project unless explicitly asked to fix/refactor.`,
+        `DO NOT create workspace/ structure for this task.`,
+        `═══════════════════════════════════`,
+    ].filter(Boolean).join('\n');
+}
+
+function buildCreationCeoPrompt(idea: string, availableRoles: string): string {
+    return [
+        `TASK: "${idea}"`,
+        `Available roles: ${availableRoles}`,
+        ``,
+        `Analyze the task and return ONLY valid JSON with these fields:`,
+        `- estimated_operations: integer (count of distinct dev operations)`,
+        `- justification: string (one sentence explaining the count)`,
+        `- complexity: "Micro" | "Standard" | "Full"`,
+        `  * Micro  = 1-3 ops  (single file, script, simple game)`,
+        `  * Standard = 4-7 ops  (REST API, small app with DB)`,
+        `  * Full  = 8+ ops  (platform, microservices, complex SaaS)`,
+        `- has_frontend: boolean (does task need UI/HTML/CSS work?)`,
+        `- has_backend: boolean (does task need server/API work?)`,
+        `- plan: array of phases, each: { name, role, dependsOn: string[] }`,
+        `  Use ONLY roles from the Available roles list above.`,
+        `IMPORTANT: Respond ONLY with a valid JSON object.`
+    ].join('\n');
+}
+
+function buildAnalysisCeoPrompt(
+    idea: string,
+    taskCtx: ReturnType<typeof detectTaskIntent>,
+    roles: string
+): string {
+    return [
+        `TASK: "${idea}"`,
+        `Intent: ${taskCtx.intent} existing project`,
+        taskCtx.sourcePath ? `Source path: ${taskCtx.sourcePath}` : '',
+        `Available roles: ${roles}`,
+        ``,
+        `Build an analysis DAG. Use roles like:`,
+        `- "Project Analyst" for initial exploration`,
+        `- "Code Reviewer" for code quality review`,
+        `- "Technical Writer" for documentation`,
+        ``,
+        `Return ONLY valid JSON:`,
+        `{`,
+        `  "estimated_operations": <int>,`,
+        `  "complexity": "Micro"|"Standard"|"Full",`,
+        `  "plan": [{"name": "...", "role": "...", "dependsOn": [...]}]`,
+        `}`,
+        `IMPORTANT: Do NOT include write_file or file creation phases.`,
+        `Focus on READ and ANALYZE operations only.`,
+    ].filter(Boolean).join('\n');
 }
 
 export function deactivate() {}

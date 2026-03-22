@@ -114,4 +114,87 @@ export class WorkspaceManager {
         const suffix = lines.length > 200 ? `\n…(${lines.length - 200} more lines)` : '';
         return `\`\`\`${doc.languageId}\n${capped.join('\n')}${suffix}\n\`\`\``;
     }
+
+    /**
+     * Повертає повний контекст відкритого проєкту у VS Code.
+     */
+    public gatherProjectContext(): {
+        rootPath: string | null;
+        projectName: string;
+        stack: string;
+        mainFiles: string[];
+        contextText: string;
+    } {
+        const folders = vscode.workspace.workspaceFolders;
+        if (!folders || folders.length === 0) {
+            return {
+                rootPath: null,
+                projectName: 'unknown',
+                stack: 'unknown',
+                mainFiles: [],
+                contextText: '',
+            };
+        }
+
+        const root = folders[0].uri.fsPath;
+        const projectName = path.basename(root);
+
+        // Визначити стек за наявними файлами
+        const stackIndicators: Array<[string, string]> = [
+            ['package.json',     'node/js'],
+            ['angular.json',     'angular'],
+            ['nest-cli.json',    'nestjs'],
+            ['next.config.js',   'nextjs'],
+            ['next.config.ts',   'nextjs'],
+            ['nuxt.config.ts',   'nuxt'],
+            ['vite.config.ts',   'vite/react/vue'],
+            ['svelte.config.js', 'svelte'],
+            ['requirements.txt', 'python'],
+            ['Cargo.toml',       'rust'],
+            ['go.mod',           'golang'],
+            ['pom.xml',          'java/spring'],
+            ['composer.json',    'php'],
+            ['pubspec.yaml',     'flutter'],
+            ['Dockerfile',       'docker'],
+            ['turbo.json',       'monorepo'],
+        ];
+
+        let stack = 'unknown';
+        const foundFiles: string[] = [];
+
+        for (const [file, detectedStack] of stackIndicators) {
+            const fullPath = path.join(root, file);
+            if (fs.existsSync(fullPath)) {
+                if (stack === 'unknown') stack = detectedStack;
+                foundFiles.push(file);
+            }
+        }
+
+        // Зібрати список ключових файлів (max 20)
+        const mainFiles: string[] = [];
+        const scanDirs = ['src', 'app', 'lib', 'pages', '.'];
+        for (const dir of scanDirs) {
+            const dirPath = path.join(root, dir);
+            if (!fs.existsSync(dirPath)) continue;
+            try {
+                const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+                for (const entry of entries) {
+                    if (entry.isFile() && mainFiles.length < 20) {
+                        mainFiles.push(dir === '.' ? entry.name : `${dir}/${entry.name}`);
+                    }
+                }
+            } catch { /* skip */ }
+            if (mainFiles.length >= 20) break;
+        }
+
+        const contextText = [
+            `PROJECT: ${projectName}`,
+            `PATH: ${root}`,
+            `STACK: ${stack}`,
+            `CONFIG FILES: ${foundFiles.join(', ') || 'none found'}`,
+            `MAIN FILES: ${mainFiles.slice(0, 10).join(', ')}`,
+        ].join('\n');
+
+        return { rootPath: root, projectName, stack, mainFiles, contextText };
+    }
 }
