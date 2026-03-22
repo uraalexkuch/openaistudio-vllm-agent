@@ -66,7 +66,7 @@ const DEFAULT_USER_ROLE: Record<string, string> = {
     "Software Test Engineer":       "Programmer",
     "Code Reviewer":                "Programmer",
     "Technical Writer":             "Chief Executive Officer",
-    "Project Analyst":              "Chief Executive Officer",
+    "Project Analyst":              "Chief Product Officer",
 };
 
 const DEFAULT_MAX_TURNS: Record<string, number> = {

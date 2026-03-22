@@ -234,8 +234,11 @@ export class Phase {
                     : '',
             ].filter(Boolean).join('\n');
 
-            promptForUser = `Review the analysis from ${this.assistantAgent.getRoleName()}. ` +
-                           `Output <DONE> when the analysis is complete and sufficient.`;
+            promptForUser = 
+                `Review the technical analysis. ` +
+                `If the project structure, tech stack and key files are described — output <DONE>. ` +
+                `Do NOT ask for business data, market analysis or financial reports. ` +
+                `Do NOT call any tools. This is a CODE project analysis only.`;
         } else if (isReviewPhase) {
             promptForAssistant = [
                 `=== ORIGINAL USER TASK ===`,
