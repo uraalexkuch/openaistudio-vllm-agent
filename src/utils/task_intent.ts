@@ -1,4 +1,4 @@
-export type TaskIntent = 'create' | 'explain' | 'fix' | 'refactor' | 'add_feature';
+export type TaskIntent = 'create' | 'explain' | 'fix' | 'refactor' | 'add_feature' | 'document';
 
 export interface TaskContext {
     intent:          TaskIntent;
@@ -23,6 +23,12 @@ const REFACTOR_KEYWORDS = [
 const ADD_KEYWORDS = [
     'додай','add','implement','реалізуй','розшир','extend',
     'інтегруй','integrate','підключи',
+];
+const DOCUMENT_KEYWORDS = [
+    'документац', 'documentation', 'readme', 'задокументуй',
+    'document this', 'document the', 'напиши документацію',
+    'створи документацію', 'технічну документацію',
+    'опиши проект', 'описати проект',
 ];
 
 /**
@@ -55,11 +61,20 @@ export function detectTaskIntent(
     const sourcePath = extractPath(idea);
 
     let intent: TaskIntent = 'create';
-    if (EXPLAIN_KEYWORDS.some(kw => lower.includes(kw)))   intent = 'explain';
-    else if (FIX_KEYWORDS.some(kw => lower.includes(kw)))  intent = 'fix';
-    else if (REFACTOR_KEYWORDS.some(kw => lower.includes(kw))) intent = 'refactor';
+
+    const hasDocKeyword = DOCUMENT_KEYWORDS.some(kw => lower.includes(kw));
+    const mentionsCurrentProject = lower.includes('поточного') || 
+                                   lower.includes('цього проект') ||
+                                   lower.includes('current project') ||
+                                   lower.includes('this project');
+
+    if (hasDocKeyword && (mentionsCurrentProject || sourcePath || currentProjectPath)) {
+        intent = 'document';
+    } else if (EXPLAIN_KEYWORDS.some(kw => lower.includes(kw)))   intent = 'explain';
+    else if (FIX_KEYWORDS.some(kw => lower.includes(kw)))         intent = 'fix';
+    else if (REFACTOR_KEYWORDS.some(kw => lower.includes(kw)))    intent = 'refactor';
     else if (ADD_KEYWORDS.some(kw => lower.includes(kw)) && (sourcePath || currentProjectPath))
-                                                                 intent = 'add_feature';
+                                                                   intent = 'add_feature';
 
     // Якщо є шлях, але немає явного наміру "створити" — ймовірно, це аналіз
     if (sourcePath && intent === 'create') {

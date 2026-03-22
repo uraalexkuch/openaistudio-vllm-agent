@@ -804,6 +804,7 @@ function intentLabel(intent: TaskIntent): string {
         fix:         'Виправлення',
         refactor:    'Рефакторинг',
         add_feature: 'Додавання функціоналу',
+        document:    'Документування',
         create:      'Створення',
     };
     return labels[intent];
@@ -835,15 +836,27 @@ function buildAnalysisContext(
     // Windows paths escaping
     const escapedSp = targetPath.replace(/\\/g, '\\\\');
 
-    const isReadOnly = taskCtx.intent === 'explain';
-    const permissions = isReadOnly
-        ? `FORBIDDEN: write_file, make_directory, launch_file. READ ONLY.`
-        : `ALLOWED: read_file, list_files, write_file (to fix issues).
-FORBIDDEN: make_directory, launch_file unless explicitly requested.`;
+    const permissions: Record<TaskIntent, string> = {
+        explain:     `FORBIDDEN: write_file, make_directory, launch_file. READ ONLY.`,
+        fix:         `ALLOWED: read_file, list_files, write_file (to fix issues).
+                      FORBIDDEN: make_directory, launch_file unless explicitly requested.`,
+        refactor:    `ALLOWED: read_file, list_files, write_file to refactor code.
+                      FORBIDDEN: make_directory, launch_file.`,
+        add_feature: `ALLOWED: all tools to add feature.`,
+        document:    `ALLOWED: read_file, list_files, write_file for .md files ONLY.
+                      Save docs to: ${targetPath}/docs/ or ${targetPath}/README.md
+                      FORBIDDEN: modifying source code files (.ts, .py, .js, etc).`,
+        create:      `ALLOWED: all tools.`,
+    };
 
     const workflow = hasInlineCode
         ? `Code is provided inline above. Analyze it directly.`
-        : `1. Start with: list_files → {"directory": "${escapedSp}"}\n2. Read key files: read_file → {"filename": "${escapedSp}/package.json"}`;
+        : `1. Start with: list_files → {"directory": "${escapedSp}"}\n` +
+          `2. Read key files: read_file → {"filename": "${escapedSp}/package.json"} (or main entry)`;
+
+    const intentStep = taskCtx.intent === 'document'
+        ? 'Write documentation files based on what you read'
+        : (taskCtx.intent === 'fix' ? 'Fix issues and write_file' : 'Analyze and explain');
 
     return [
         `═══ EXISTING PROJECT: ${taskCtx.intent.toUpperCase()} ═══`,
@@ -853,9 +866,9 @@ FORBIDDEN: make_directory, launch_file unless explicitly requested.`;
         ``,
         `WORKFLOW:`,
         workflow,
-        `3. ${taskCtx.intent === 'fix' ? 'Fix issues and write_file' : 'Analyze and explain'}`,
+        `3. ${intentStep}`,
         ``,
-        permissions,
+        permissions[taskCtx.intent],
         `DO NOT create workspace/ structure for this task.`,
         `═══════════════════════════════════`,
     ].filter(Boolean).join('\n');
@@ -886,16 +899,20 @@ function buildAnalysisCeoPrompt(
     taskCtx: ReturnType<typeof detectTaskIntent>,
     roles: string
 ): string {
+    const phaseGuide = taskCtx.intent === 'document'
+        ? `Build a documentation DAG:
+           - "Project Analyst" → reads and understands the project
+           - "Technical Writer" × N → writes each documentation section
+           Save all .md files to the actual project path, NOT workspace/`
+        : `Build an analysis DAG using Project Analyst, Code Reviewer etc.`;
+
     return [
         `TASK: "${idea}"`,
         `Intent: ${taskCtx.intent} existing project`,
         taskCtx.sourcePath ? `Source path: ${taskCtx.sourcePath}` : '',
         `Available roles: ${roles}`,
         ``,
-        `Build an analysis DAG. Use roles like:`,
-        `- "Project Analyst" for initial exploration`,
-        `- "Code Reviewer" for code quality review`,
-        `- "Technical Writer" for documentation`,
+        phaseGuide,
         ``,
         `Return ONLY valid JSON:`,
         `{`,
@@ -903,8 +920,8 @@ function buildAnalysisCeoPrompt(
         `  "complexity": "Micro"|"Standard"|"Full",`,
         `  "plan": [{"name": "...", "role": "...", "dependsOn": [...]}]`,
         `}`,
-        `IMPORTANT: Do NOT include write_file or file creation phases.`,
-        `Focus on READ and ANALYZE operations only.`,
+        `IMPORTANT: ${taskCtx.intent === 'document' ? 'ONLY .md files are allowed to be written.' : 'Do NOT include write_file or file creation phases.'}`,
+        `Focus on ${taskCtx.intent === 'document' ? 'understanding and documenting' : 'READ and ANALYZE'} operations.`,
     ].filter(Boolean).join('\n');
 }
 
