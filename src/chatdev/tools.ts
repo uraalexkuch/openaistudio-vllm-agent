@@ -50,12 +50,22 @@ export function parseToolCall(responseText: string): ToolCall | null {
     }
 
     // Strategy 2: <tool_call>...<known_name>...(optional <args>)...</known_name>...</tool_call>
+    // FIX: more tolerant to extra tags/whitespace after closing tag
     const s2re = new RegExp(
         `<tool_call>[\\s\\S]*?<(${knownRe})>([\\s\\S]*?)<\/\\1>[\\s\\S]*?<\/tool_call>`, 'i'
     );
     const s2 = responseText.match(s2re);
     if (s2) {
         return { name: s2[1].trim(), args: tryParseArgs(s2[2]) };
+    }
+
+    // Strategy 2b: XML with <args> tag (common failure: <tool_call><list_files><args>...</args></args></tool_call>)
+    const s2bre = new RegExp(
+        `<tool_call>[\\s\\S]*?<(${knownRe})>[\\s\\S]*?<args>([\\s\\S]*?)<\/args>[\\s\\S]*?<\/\\1>[\\s\\S]*?<\/tool_call>`, 'i'
+    );
+    const s2b = responseText.match(s2bre);
+    if (s2b) {
+        return { name: s2b[1].trim(), args: tryParseArgs(s2b[2]) };
     }
 
     // Strategy 3: bare <known_name>...</known_name> anywhere
@@ -126,6 +136,15 @@ export function parseToolCall(responseText: string): ToolCall | null {
         } catch {}
     }
 
+    // Strategy 8: bare tool name + JSON on next line
+    const s8re = new RegExp(`(?:^|\\n)\\s*(${knownRe})\\s*\\n\\s*(\\{[\\s\\S]*?\\})`, 'i');
+    const s8 = responseText.match(s8re);
+    if (s8) {
+        try {
+            return { name: s8[1].trim(), args: JSON.parse(s8[2]) };
+        } catch {}
+    }
+
     return null;
 }
 
@@ -171,6 +190,11 @@ export async function executeTool(toolCall: ToolCall): Promise<string> {
                     return `read_file error: "${filename}" does not exist in workspace.`;
                 }
                 const content = fs.readFileSync(filePath, 'utf8');
+                const MAX_READ_CHARS = 8000; // ~2700 tokens
+                if (content.length > MAX_READ_CHARS) {
+                    return `=== ${filename} (first ${MAX_READ_CHARS} characters of ${content.length}) ===\n` +
+                           content.substring(0, MAX_READ_CHARS) + '\n…[truncated]';
+                }
                 return `=== ${filename} ===\n${content}`;
             } catch (err: any) {
                 return `read_file error: ${err.message}`;
@@ -187,32 +211,45 @@ export async function executeTool(toolCall: ToolCall): Promise<string> {
                 if (!dirPath) return 'list_files error: directory escapes workspace.';
                 if (!fs.existsSync(dirPath)) return `list_files: directory "${subdir || '.'}" does not exist.`;
 
+                const SKIP_DIRS = new Set(['.git', 'node_modules', '.next', 'dist', 'build', '__pycache__', '.adminjs', '.venv', 'venv']);
                 const entries: string[] = [];
-                const walk = (dir: string, prefix: string) => {
+                let totalCount = 0;
+
+                const walk = (dir: string, prefix: string, depth = 0) => {
+                    if (depth > 5) return; // limit depth to prevent infinite loops or huge outputs
                     try {
                         const items = fs.readdirSync(dir);
                         for (const entry of items) {
+                            if (SKIP_DIRS.has(entry)) continue; 
+                            totalCount++;
                             const full = path.join(dir, entry);
                             const rel  = prefix ? `${prefix}/${entry}` : entry;
                             try {
                                 if (fs.statSync(full).isDirectory()) {
                                     entries.push(`📁 ${rel}/`);
-                                    walk(full, rel);
+                                    walk(full, rel, depth + 1);
                                 } else {
                                     const size = fs.statSync(full).size;
                                     entries.push(`📄 ${rel} (${(size / 1024).toFixed(1)} KB)`);
                                 }
                             } catch (e: any) {
-                                // Skip individual files/folders we can't stat (EPERM etc)
-                                entries.push(`⚠️ ${rel} (виняток: ${e.code || 'error'})`);
+                                entries.push(`⚠️ ${rel} (exception: ${e.code || 'error'})`);
                             }
                         }
                     } catch (e: any) {
-                        // Skip entire directory if readdir fails
-                        entries.push(`⚠️ ${prefix || dir} (немає доступу: ${e.code || 'error'})`);
+                        entries.push(`⚠️ ${prefix || dir} (access denied: ${e.code || 'error'})`);
                     }
                 };
                 walk(dirPath, '');
+
+                const MAX_ENTRIES = 200;
+                if (entries.length > MAX_ENTRIES) {
+                    const shown = entries.slice(0, MAX_ENTRIES);
+                    shown.push(`…(shown ${MAX_ENTRIES} of ${entries.length} files total)`);
+                    const isAbsolutePath = subdir && path.isAbsolute(subdir);
+                    const displayPrefix = isAbsolutePath ? subdir : `workspace/${subdir || ''}`;
+                    return `${displayPrefix}:\n${shown.join('\n')}`;
+                }
                 const isAbsolutePath = subdir && path.isAbsolute(subdir);
                 const displayPrefix = isAbsolutePath ? subdir : `workspace/${subdir || ''}`;
                 return entries.length
@@ -251,12 +288,18 @@ export function getToolsDescription(): string {
     return [
         "You have access to tools. To call a tool output EXACTLY this XML (one call per turn):",
         "",
+        "CORRECT (only accepted format):",
         "<tool_call>",
-        "<n>TOOL_NAME</n>",
-        '<args>{"arg1": "value1"}</args>',
+        "<n>list_files</n>",
+        '<args>{"directory": "src"}</args>',
         "</tool_call>",
         "",
         "Wait for <tool_result> before the next call.",
+        "",
+        "WRONG - will be ignored:",
+        "  <tool_call><list_files><args>{...}</args></args></tool_call>  (double tags)",
+        "  {\"name\": \"list_files\", \"arguments\": {...}}                   (JSON format)",
+        "  ```tool_code\n{...}\n```                                     (code block)",
         "",
         "TOOLS:",
         "  write_file     — Save a file (creates parent dirs automatically).",
@@ -284,6 +327,14 @@ export function getToolsDescription(): string {
         "  web_search     — Args: {\"query\": \"...\"}",
         "",
         "  delegate_to_expert — Args: {\"expert_role\": \"...\", \"task_description\": \"...\"}",
+        "",
+        "",
+        "PROJECT ANALYST MANDATORY RULES:",
+        "1. You MUST call tools to read actual files.",
+        "2. Do NOT write documentation based on assumptions or imagination.",
+        "3. Do NOT invent file contents or dependencies.",
+        "4. FIRST call list_files, THEN read_file for each key file found.",
+        "5. ONLY THEN write your analysis based on ACTUAL file contents.",
         "",
         "RULES:",
         "1. Filename specified → call write_file with EXACT name.",

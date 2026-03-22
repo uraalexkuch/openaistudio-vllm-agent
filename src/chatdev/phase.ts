@@ -235,10 +235,11 @@ export class Phase {
             ].filter(Boolean).join('\n');
 
             promptForUser = 
-                `Review the technical analysis. ` +
-                `If the project structure, tech stack and key files are described — output <DONE>. ` +
-                `Do NOT ask for business data, market analysis or financial reports. ` +
-                `Do NOT call any tools. This is a CODE project analysis only.`;
+                `You are reviewing a technical project analysis. ` +
+                `ONLY check: did the analyst call list_files and read_file tools? ` +
+                `If yes and the project structure is described → output <DONE>. ` +
+                `If no tools were called → say "Please call list_files first". ` +
+                `Do NOT provide business advice. Do NOT call tools yourself.`;
         } else if (isReviewPhase) {
             promptForAssistant = [
                 `=== ORIGINAL USER TASK ===`,
