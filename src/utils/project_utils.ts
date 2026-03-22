@@ -1,5 +1,6 @@
 // src/utils/project_utils.ts
 import * as path from 'path';
+import * as vscode from 'vscode';
 
 // ─── Типи ─────────────────────────────────────────────────────────────────
 
@@ -85,6 +86,16 @@ const STACK_KEYWORDS: Array<[TechStack, string[]]> = [
 ];
 
 export function detectStack(idea: string): TechStack {
+    // Перевірити примусове налаштування
+    const forced = vscode.workspace
+        .getConfiguration('openaistudio')
+        .get<string>('forceStack', '')
+        .trim() as TechStack;
+
+    if (forced && forced in DEFS) {
+        return forced;
+    }
+
     const lower = idea.toLowerCase();
     for (const [stack, keywords] of STACK_KEYWORDS) {
         if (keywords.some(kw => lower.includes(kw))) return stack;

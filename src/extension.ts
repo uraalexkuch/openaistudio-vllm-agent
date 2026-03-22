@@ -353,9 +353,12 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
     }
 
     // Повідомити у чат та додати до промпту задачі
+    const forcedStack = config.get<string>('forceStack', '');
+    const stackSource = forcedStack ? '(вручну)' : '(автовизначено)';
+
     ChatWebview.currentPanel?.broadcastEvent({
         type: 'narration',
-        content: `📁 Папка проєкту: workspace/${layout.slug}\n${layout.promptHint}`
+        content: `📁 Стек: ${layout.stack.toUpperCase()} ${stackSource} | Папка: workspace/${layout.slug}/`
     });
 
     fullExecutionPrompt = `${layout.promptHint}\n\n${fullExecutionPrompt}`;
@@ -568,6 +571,18 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
         // Cap total session context to prevent prompt overflow
         globalSessionContext = trimSessionContext(globalSessionContext, 3000);
 
+        // Якщо стек був зафіксований вручну — запропонувати скинути
+        const forcedStack = config.get<string>('forceStack', '');
+        if (forcedStack) {
+            const reset = await vscode.window.showInformationMessage(
+                `Стек "${forcedStack}" зафіксований. Скинути на "Автоматично"?`,
+                'Так, скинути', 'Залишити'
+            );
+            if (reset === 'Так, скинути') {
+                await config.update('forceStack', '', vscode.ConfigurationTarget.Global);
+            }
+        }
+
         ChatWebview.currentPanel?.broadcastEvent({ type: 'narration', content: "✅ Процес завершено." });
         ChatWebview.currentPanel?.broadcastEvent({ type: 'done' });
     } catch (e: any) {
@@ -588,6 +603,67 @@ export function activate(context: vscode.ExtensionContext) {
         context.subscriptions.push(vscode.commands.registerCommand('openaistudio.openAgent', () => {
             ChatWebview.createOrShow(context.extensionUri);
         }));
+        context.subscriptions.push(
+            vscode.commands.registerCommand('openaistudio.selectStack', async () => {
+                const config = vscode.workspace.getConfiguration('openaistudio');
+
+                const STACK_LABELS: Array<{ label: string; description: string; value: string }> = [
+                    { label: '$(search) Автоматично',            description: 'Визначати зі тексту задачі', value: '' },
+                    { label: '$(globe) HTML/CSS/JS',              description: 'vanilla',         value: 'html' },
+                    { label: '$(symbol-class) React',             description: 'Vite / CRA',      value: 'react' },
+                    { label: '$(symbol-class) Vue 3',             description: 'Vite',            value: 'vue' },
+                    { label: '$(symbol-class) Angular',           description: 'ng CLI',          value: 'angular' },
+                    { label: '$(symbol-class) Svelte',            description: 'Vite',            value: 'svelte' },
+                    { label: '$(symbol-class) Astro',             description: 'static',          value: 'astro' },
+                    { label: '$(layers) Next.js',                 description: 'App Router',      value: 'nextjs' },
+                    { label: '$(layers) Nuxt 3',                  description: 'fullstack',       value: 'nuxt' },
+                    { label: '$(layers) Remix',                   description: 'fullstack',       value: 'remix' },
+                    { label: '$(layers) SvelteKit',               description: 'fullstack',       value: 'sveltekit' },
+                    { label: '$(server) Node.js',                 description: 'Express',         value: 'node' },
+                    { label: '$(server) NestJS',                  description: 'TypeScript',      value: 'nestjs' },
+                    { label: '$(server) Fastify',                 description: 'Node',            value: 'fastify' },
+                    { label: '$(server) Hono',                    description: 'Edge/Bun',        value: 'hono' },
+                    { label: '$(server) Flask',                   description: 'Python',          value: 'flask' },
+                    { label: '$(server) FastAPI',                 description: 'Python',          value: 'fastapi' },
+                    { label: '$(server) Django',                  description: 'Python',          value: 'django' },
+                    { label: '$(terminal) Python script',         description: 'CLI/tool',        value: 'python' },
+                    { label: '$(server) Go',                      description: 'Gin/stdlib',      value: 'golang' },
+                    { label: '$(server) Spring Boot',             description: 'Java',            value: 'spring' },
+                    { label: '$(server) Rust',                    description: 'Axum/Actix',      value: 'rust' },
+                    { label: '$(server) .NET / C#',               description: 'ASP.NET',         value: 'dotnet' },
+                    { label: '$(server) PHP / Laravel',           description: 'Laravel',         value: 'php' },
+                    { label: '$(symbol-interface) TypeScript',    description: 'ts-node',         value: 'typescript' },
+                    { label: '$(symbol-interface) Deno',          description: 'Oak/Fresh',       value: 'deno' },
+                    { label: '$(device-mobile) React Native',     description: 'Expo',            value: 'reactnative' },
+                    { label: '$(device-mobile) Flutter',          description: 'Dart',            value: 'flutter' },
+                    { label: '$(desktop-download) Electron',      description: 'desktop',         value: 'electron' },
+                    { label: '$(desktop-download) Tauri',         description: 'Rust+Web',        value: 'tauri' },
+                    { label: '$(graph) Data Science',             description: 'Jupyter/Python',  value: 'datasci' },
+                    { label: '$(hubot) ML / AI',                  description: 'PyTorch/TF',      value: 'mlops' },
+                    { label: '$(package) Docker / DevOps',        description: 'Compose',         value: 'docker' },
+                    { label: '$(repo) Monorepo',                  description: 'Turborepo',       value: 'monorepo' },
+                ];
+
+                const current = config.get<string>('forceStack', '') || '';
+                const currentItem = STACK_LABELS.find(i => i.value === current);
+
+                const picked = await vscode.window.showQuickPick(STACK_LABELS, {
+                    title: `Вибір стеку проєкту  [поточний: ${currentItem?.label ?? 'Автоматично'}]`,
+                    placeHolder: 'Почніть вводити назву стеку…',
+                    matchOnDescription: true,
+                });
+
+                if (picked === undefined) return;
+
+                await config.update('forceStack', picked.value, vscode.ConfigurationTarget.Global);
+
+                const msg = picked.value
+                    ? `Стек зафіксовано: ${picked.label}. Скиньте на "Автоматично" після задачі.`
+                    : `Стек: Автоматично (визначається з тексту задачі).`;
+
+                vscode.window.showInformationMessage(`OpenAIStudio: ${msg}`);
+            })
+        );
         context.subscriptions.push(vscode.commands.registerCommand('openaistudio.newTask', async () => {
             if (globalSessionContext.trim()) {
                 const choice = await vscode.window.showWarningMessage(

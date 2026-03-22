@@ -24,6 +24,10 @@
         "title": "OpenAIStudio: Відкрити чат агента"
       },
       {
+        "command": "openaistudio.selectStack",
+        "title": "OpenAIStudio: Вибрати стек проєкту"
+      },
+      {
         "command": "openaistudio.newTask",
         "title": "OpenAIStudio: Нове завдання (Проєкт)"
       },
@@ -156,6 +160,38 @@
             "Polski"
           ],
           "markdownDescription": "Мова відповідей агентів у чаті. Порожньо = визначається автоматично."
+        },
+        "openaistudio.forceStack": {
+          "type": "string",
+          "default": "",
+          "enum": [
+            "",
+            "html","react","vue","angular","svelte","astro",
+            "nextjs","nuxt","remix","sveltekit",
+            "node","nestjs","fastify","hono",
+            "flask","fastapi","django","python",
+            "golang","spring","rust","dotnet","php",
+            "typescript","deno",
+            "reactnative","flutter",
+            "electron","tauri",
+            "datasci","mlops",
+            "docker","monorepo"
+          ],
+          "enumDescriptions": [
+            "Автоматично (визначається з тексту задачі)",
+            "HTML/CSS/JS — vanilla","React (Vite/CRA)","Vue 3 (Vite)",
+            "Angular (ng CLI)","Svelte","Astro",
+            "Next.js (App Router)","Nuxt 3","Remix","SvelteKit",
+            "Node.js (Express)","NestJS","Fastify","Hono",
+            "Flask (Python)","FastAPI (Python)","Django (Python)","Python script",
+            "Go (Gin/stdlib)","Spring Boot (Java)","Rust (Axum/Actix)",".NET / C#","PHP / Laravel",
+            "TypeScript (ts-node)","Deno",
+            "React Native (Expo)","Flutter (Dart)",
+            "Electron","Tauri",
+            "Data Science (Jupyter)","ML / AI (Python)",
+            "Docker / DevOps","Monorepo (Turborepo)"
+          ],
+          "markdownDescription": "Примусово вказати стек. Залиште порожнім для автовизначення."
         }
       }
     }
