@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Юрій Кучеренко.
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';

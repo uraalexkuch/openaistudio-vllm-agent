@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Юрій Кучеренко.
 import { web_search } from "../tools/web_search";
 import { delegate_to_expert } from "../tools/delegate_to_expert";
 import { launch_file } from "../tools/launch_file";

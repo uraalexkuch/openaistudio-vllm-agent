@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Юрій Кучеренко.
 import { ChatAgent } from "../camel/chat_agent";
 import { RoleType } from "../camel/typing";
 import { autoLoadSkillsForTask } from "../chatdev/skills";

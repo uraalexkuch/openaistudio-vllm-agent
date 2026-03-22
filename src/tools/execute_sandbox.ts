@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Юрій Кучеренко.
 /**
  * execute_sandbox.ts  —  src/tools/execute_sandbox.ts
  *

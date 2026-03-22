@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Юрій Кучеренко.
 import axios from 'axios';
 import * as vscode from 'vscode';
 

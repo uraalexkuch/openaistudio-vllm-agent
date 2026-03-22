@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Юрій Кучеренко.
 import * as fs from 'fs';
 
 export class Memory {
