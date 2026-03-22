@@ -843,9 +843,10 @@ function buildAnalysisContext(
         refactor:    `ALLOWED: read_file, list_files, write_file to refactor code.
                       FORBIDDEN: make_directory, launch_file.`,
         add_feature: `ALLOWED: all tools to add feature.`,
-        document:    `ALLOWED: read_file, list_files, write_file for .md files ONLY.
-                      Save docs to: ${targetPath}/docs/ or ${targetPath}/README.md
-                      FORBIDDEN: modifying source code files (.ts, .py, .js, etc).`,
+        document:    `ALLOWED: read_file, list_files, write_file for .md ONLY.
+                      ALL write_file filenames MUST start with: "${escapedSp}/"
+                      Example: {"filename": "${escapedSp}/README.md"}
+                      FORBIDDEN: workspace/ path, modifying source code files.`,
         create:      `ALLOWED: all tools.`,
     };
 

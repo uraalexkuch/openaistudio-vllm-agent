@@ -69,7 +69,14 @@ export function detectTaskIntent(
                                    lower.includes('this project');
 
     if (hasDocKeyword && (mentionsCurrentProject || sourcePath || currentProjectPath)) {
-        intent = 'document';
+        const hasNewProject = ['новий','нову','new','for a','для нового'].some(kw => lower.includes(kw));
+        const hasExplicitCreate = ['створи','create','зроби','make'].some(kw => lower.includes(kw));
+
+        if (hasExplicitCreate && hasNewProject && !mentionsCurrentProject && !sourcePath) {
+            intent = 'create'; // "створи документацію для нового API" → create
+        } else {
+            intent = 'document';
+        }
     } else if (EXPLAIN_KEYWORDS.some(kw => lower.includes(kw)))   intent = 'explain';
     else if (FIX_KEYWORDS.some(kw => lower.includes(kw)))         intent = 'fix';
     else if (REFACTOR_KEYWORDS.some(kw => lower.includes(kw)))    intent = 'refactor';

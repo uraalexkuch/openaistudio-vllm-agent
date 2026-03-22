@@ -192,9 +192,11 @@ export async function executeTool(toolCall: ToolCall): Promise<string> {
                     }
                 };
                 walk(dirPath, '');
+                const isAbsolutePath = subdir && path.isAbsolute(subdir);
+                const displayPrefix = isAbsolutePath ? subdir : `workspace/${subdir || ''}`;
                 return entries.length
-                    ? `workspace/${subdir || ''}:\n${entries.join('\n')}`
-                    : `workspace/${subdir || ''} is empty.`;
+                    ? `${displayPrefix}:\n${entries.join('\n')}`
+                    : `${displayPrefix} is empty.`;
             } catch (err: any) {
                 return `list_files error: ${err.message}`;
             }

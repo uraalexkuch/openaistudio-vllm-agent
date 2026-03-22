@@ -73,18 +73,21 @@ export class Phase {
             console.log(`[Phase:${this.phaseName}] Loading specific skills: ${this.roleSkills.join(', ')}`);
             // We'll try to match these names against folders in skillsPath
             const allScored = await autoLoadSkillsForTask(`${this.roleSkills.join(' ')}`, "", 10, isFixOrReview);
-            const currentRoleSkills = this.roleSkills;
-            loadedSkills = allScored.filter(s => {
-                const lf = s.folderName.toLowerCase();
-                const ln = s.name.toLowerCase();
-                return currentRoleSkills.some(rs => {
-                    const lrs = rs.toLowerCase();
-                    return lf === lrs ||
-                           lf.endsWith('/' + lrs) ||
-                           ln === lrs ||
-                           ln.includes(lrs);
+            const currentRoleSkills = this.roleSkills; // Assuming roleDetail is not available, using this.roleSkills as before
+            if (currentRoleSkills.length > 0) {
+                loadedSkills = allScored.filter((s: any) => {
+                    if (META_SKILLS.has(s.folderName.toLowerCase())) return false;
+                    const lf = s.folderName.toLowerCase();
+                    const ln = s.name.toLowerCase();
+                    return currentRoleSkills.some((rs: string) => {
+                        const lrs = rs.toLowerCase();
+                        return lf === lrs ||
+                               lf.endsWith('/' + lrs) ||
+                               ln === lrs ||
+                               ln.includes(lrs);
+                    });
                 });
-            });
+            }
         }
 
         if (loadedSkills.length === 0) {
