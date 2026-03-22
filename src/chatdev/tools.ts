@@ -145,7 +145,7 @@ export async function executeTool(toolCall: ToolCall): Promise<string> {
                 const filename = String(toolCall.args.filename ?? '').trim();
                 if (!filename) return 'read_file error: "filename" argument is required.';
 
-                const filePath = resolveToolPath(filename);
+                const filePath = resolveToolPath(filename, true);
                 if (!fs.existsSync(filePath)) {
                     return `read_file error: "${filename}" does not exist in workspace.`;
                 }
@@ -161,7 +161,7 @@ export async function executeTool(toolCall: ToolCall): Promise<string> {
             try {
                 const root    = getWorkspaceRoot();
                 const subdir  = toolCall.args.directory ? String(toolCall.args.directory).trim() : '';
-                const dirPath = subdir ? resolveToolPath(subdir) : root;
+                const dirPath = subdir ? resolveToolPath(subdir, true) : root;
 
                 if (!dirPath) return 'list_files error: directory escapes workspace.';
                 if (!fs.existsSync(dirPath)) return `list_files: directory "${subdir || '.'}" does not exist.`;

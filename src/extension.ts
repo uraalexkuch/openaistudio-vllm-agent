@@ -66,6 +66,7 @@ const DEFAULT_USER_ROLE: Record<string, string> = {
     "Software Test Engineer":       "Programmer",
     "Code Reviewer":                "Programmer",
     "Technical Writer":             "Chief Executive Officer",
+    "Project Analyst":              "Chief Executive Officer",
 };
 
 const DEFAULT_MAX_TURNS: Record<string, number> = {
@@ -512,9 +513,6 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
     }> = [];
 
     if (dagPhases.length === 0) {
-        // Fallback or explicit simple task logic
-        const isVerySimple = idea.length < 50;
-
         let basePipeline =
             currentTaskComplexity === "High"   ? FULL_PIPELINE     :
             currentTaskComplexity === "Medium" ? STANDARD_PIPELINE :

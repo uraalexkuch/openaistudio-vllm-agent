@@ -16,11 +16,13 @@ export function getWorkspaceRoot(): string {
  * Otherwise, it resolves it relative to the workspace directory.
  * NOTE: Absolute paths are allowed to enable full disk interaction as requested by the user.
  */
-export function resolveToolPath(filename: string): string {
+export function resolveToolPath(filename: string, readOnly: boolean = false): string {
     if (!filename) return getWorkspaceRoot();
     
     // Check if it's already an absolute path
     if (path.isAbsolute(filename)) {
+        if (readOnly) return filename;
+
         const root = getWorkspaceRoot();
         const home = os.homedir();
         // Allow ONLY paths inside home or workspace
