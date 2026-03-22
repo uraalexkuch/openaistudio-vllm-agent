@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Юрій Кучеренко.
 export enum RoleType {
     ASSISTANT = "assistant",
     USER = "user",

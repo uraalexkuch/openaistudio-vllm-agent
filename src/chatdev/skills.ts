@@ -149,11 +149,18 @@ function tokenize(text: string): string[] {
       .filter(w => w.length > 2 && !STOP.has(w));
 }
 
-let _idfCache: Map<string, number> | null = null;
-let _idfSkillsPath = '';
+let _idfCache: { 
+  path: string, 
+  data: Map<string, number>, 
+  ts: number 
+} | null = null;
+const IDF_CACHE_TTL = 60_000; // 1 minute
 
 function buildIdfCache(skillsPath: string): Map<string, number> {
-  if (_idfCache && _idfSkillsPath === skillsPath) return _idfCache;
+  const now = Date.now();
+  if (_idfCache && _idfCache.path === skillsPath && (now - _idfCache.ts) < IDF_CACHE_TTL) {
+    return _idfCache.data;
+  }
 
   const files = scanSkillFolders(skillsPath);
   if (files.length === 0) return new Map();
@@ -185,8 +192,7 @@ function buildIdfCache(skillsPath: string): Map<string, number> {
     else                  cache.set(token, 1.0);
   });
 
-  _idfCache      = cache;
-  _idfSkillsPath = skillsPath;
+  _idfCache = { path: skillsPath, data: cache, ts: now };
   return cache;
 }
 

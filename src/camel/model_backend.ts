@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Юрій Кучеренко.
 import OpenAI from "openai";
 import * as vscode from "vscode";
 import { ChatMessage } from "./typing";
@@ -16,7 +17,6 @@ const TOKENIZER_OVERHEAD = 256;
 const MAX_OUTPUT_FRACTION = 0.65;
 
 export class VLLMModelBackend {
-    public static currentTaskComplexity: string = "High";
     private openai: OpenAI;
     private model: string;     // API model name sent in request body
     private urlPath: string;   // nginx path segment  (may differ from model name!)
@@ -52,7 +52,7 @@ export class VLLMModelBackend {
         const modelGeneral   = config.get<string>("modelGeneral",   "gemma").trim();
 
         const roleLower = roleName.toLowerCase();
-        const isComplex = taskComplexity === "High" || VLLMModelBackend.currentTaskComplexity === "High";
+        const isComplex = taskComplexity === "High";
 
         let chosenPath: string;
 

@@ -58,10 +58,19 @@ export function parseToolCall(responseText: string): ToolCall | null {
     }
 
     // Strategy 3: bare <known_name>...</known_name> anywhere
-    const s3re = new RegExp(`<(${knownRe})>([\\s\\S]*?)<\/\\1>`, 'i');
-    const s3 = responseText.match(s3re);
-    if (s3) {
-        return { name: s3[1].trim(), args: tryParseArgs(s3[2]) };
+    // FIX: ensure we don't match tags inside markdown code blocks
+    const s3re = new RegExp(`<(${knownRe})>([\\s\\S]*?)<\/\\1>`, 'gi');
+    let match;
+    while ((match = s3re.exec(responseText)) !== null) {
+        const fullMatch = match[0];
+        const matchIndex = match.index;
+        
+        // Simple check: is this match inside a ``` block?
+        const textBefore = responseText.substring(0, matchIndex);
+        const codeBlockCount = (textBefore.match(/```/g) || []).length;
+        if (codeBlockCount % 2 === 0) {
+            return { name: match[1].trim(), args: tryParseArgs(match[2]) };
+        }
     }
 
     // Strategy 4: self-closing <known_name/> or <known_name attr="..."/>

@@ -1,4 +1,5 @@
 import * as path from 'path';
+import * as os from 'os';
 
 /**
  * Gets the absolute path to the standard workspace directory.
@@ -19,6 +20,12 @@ export function resolveToolPath(filename: string): string {
     
     // Check if it's already an absolute path
     if (path.isAbsolute(filename)) {
+        const root = getWorkspaceRoot();
+        const home = os.homedir();
+        // Allow ONLY paths inside home or workspace
+        if (!filename.startsWith(home) && !filename.startsWith(root)) {
+            throw new Error(`Absolute path outside user home or workspace blocked: ${filename}`);
+        }
         return filename;
     }
     

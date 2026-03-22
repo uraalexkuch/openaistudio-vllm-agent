@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Юрій Кучеренко.
 import { Phase } from "./phase";
 import * as vscode from "vscode";
 import { AgentEvent } from "../camel/typing";
@@ -90,29 +91,39 @@ export class ChatChain {
             vscode.window.showInformationMessage(`Starting phase: ${phase.phaseName}`);
             this.onEvent?.({ type: "narration", content: `🔷 Фаза: ${phase.phaseName}` });
 
-            const context   = buildContext();
-            const rawResult = await phase.execute(context);
+            const context = buildContext();
+            
+            try {
+                // FIX: Phase timeout (5 minutes) to prevent getting stuck
+                const phaseTimeoutLimit = 5 * 60 * 1000;
+                const rawResult = await Promise.race([
+                    phase.execute(context),
+                    new Promise<string>((_, reject) => 
+                        setTimeout(() => reject(new Error(`Phase "${phase.phaseName}" timed out after 5m`)), phaseTimeoutLimit)
+                    )
+                ]);
 
-            this.memory.append(`\n=== PHASE: ${phase.phaseName} ===\n${rawResult}`);
-            try { this.memory.saveMemory(logPath); } catch {}
+                this.memory.append(`\n=== PHASE: ${phase.phaseName} ===\n${rawResult}`);
+                try { this.memory.saveMemory(logPath); } catch {}
 
-            this.onEvent?.({ type: "narration", content: `📝 Підсумовую фазу: ${phase.phaseName}…` });
-            const summary = await this.summarise(phase.phaseName, rawResult);
+                this.onEvent?.({ type: "narration", content: `📝 Підсумовую фазу: ${phase.phaseName}…` });
+                const summary = await this.summarise(phase.phaseName, rawResult);
 
-            completedSummaries[phase.phaseName] = summary;
-            this.chatEnv[`${phase.phaseName}_output`]  = rawResult;
-            this.chatEnv[`${phase.phaseName}_summary`] = summary;
+                completedSummaries[phase.phaseName] = summary;
+                this.chatEnv[`${phase.phaseName}_output`]  = rawResult;
+                this.chatEnv[`${phase.phaseName}_summary`] = summary;
 
-            // Extract filenames from tool results so next phases know what exists
-            const fileMatches = rawResult.match(/File "([^"]+)" saved successfully/gi) || [];
-            for (const m of fileMatches) {
-                const fn = m.match(/File "([^"]+)"/i)?.[1];
-                if (fn && !savedFiles.includes(fn)) savedFiles.push(fn);
+                // Extract filenames from tool results so next phases know what exists
+                const fileMatches = rawResult.match(/File "([^"]+)" saved successfully/gi) || [];
+                for (const m of fileMatches) {
+                    const fn = m.match(/File "([^"]+)"/i)?.[1];
+                    if (fn && !savedFiles.includes(fn)) savedFiles.push(fn);
+                }
+
+                done.add(phase.phaseName);
+            } finally {
+                inFlight.delete(phase.phaseName);
             }
-
-            done.delete(phase.phaseName); // remove from in-flight tracking
-            done.add(phase.phaseName);
-            inFlight.delete(phase.phaseName);
         };
 
         const remaining = [...this.phaseDefs];

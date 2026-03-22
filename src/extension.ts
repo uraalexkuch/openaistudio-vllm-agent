@@ -22,42 +22,41 @@ interface RoleDetail {
 
 type RoleConfig = Record<string, string | RoleDetail> & { roles?: Record<string, RoleDetail> };
 
-const LIGHT_PIPELINE: Array<{
-    phaseName: string;
-    assistantRole: string;
-    userRole: string;
-    maxTurns: number;
-    dependsOn: string[];
-}> = [
-    { phaseName: "Implementation",       assistantRole: "Programmer",       userRole: "Chief Technology Officer", maxTurns: 2, dependsOn: [] },
-    { phaseName: "Code Review",          assistantRole: "Code Reviewer",    userRole: "Programmer",               maxTurns: 4, dependsOn: ["Implementation"] },
-    { phaseName: "Project Documentation",assistantRole: "Technical Writer", userRole: "Chief Executive Officer",  maxTurns: 2, dependsOn: ["Code Review"] },
+// Мікро: 1-3 операції — гра, скрипт, проста сторінка
+const MICRO_PIPELINE = [
+    { phaseName: "Implementation",        assistantRole: "Programmer",       userRole: "Chief Technology Officer", maxTurns: 2, dependsOn: [] },
+    { phaseName: "Code Review",           assistantRole: "Code Reviewer",    userRole: "Programmer",               maxTurns: 3, dependsOn: ["Implementation"] },
+    { phaseName: "Project Documentation", assistantRole: "Technical Writer", userRole: "Chief Executive Officer",  maxTurns: 1, dependsOn: ["Code Review"] },
 ];
 
-const HEAVY_PIPELINE: Array<{
-    phaseName: string;
-    assistantRole: string;
-    userRole: string;
-    maxTurns: number;
-    dependsOn: string[];
-}> = [
-    { phaseName: "Business Analysis",    assistantRole: "Chief Executive Officer",       userRole: "Chief Product Officer",    maxTurns: 2, dependsOn: [] },
-    { phaseName: "System Architecture",  assistantRole: "Chief Technology Officer",      userRole: "Chief Executive Officer",  maxTurns: 2, dependsOn: ["Business Analysis"] },
-    { phaseName: "Database Optimization",assistantRole: "Database Optimization Expert", userRole: "Chief Technology Officer", maxTurns: 2, dependsOn: ["System Architecture"] },
-    { phaseName: "Cyber Security Audit", assistantRole: "Cyber Security Specialist",    userRole: "Chief Technology Officer", maxTurns: 2, dependsOn: ["Database Optimization"] },
-    { phaseName: "Implementation",       assistantRole: "Programmer",                    userRole: "Chief Technology Officer", maxTurns: 2, dependsOn: ["Cyber Security Audit"] },
-    { phaseName: "Quality Assurance",    assistantRole: "Software Test Engineer",        userRole: "Programmer",               maxTurns: 2, dependsOn: ["Implementation"] },
-    { phaseName: "Code Review",          assistantRole: "Code Reviewer",                 userRole: "Programmer",               maxTurns: 4, dependsOn: ["Quality Assurance"] },
-    { phaseName: "Project Documentation",assistantRole: "Technical Writer",              userRole: "Chief Executive Officer",  maxTurns: 2, dependsOn: ["Code Review"] },
+// Стандарт: 4-7 операцій — REST API, dashboard, невеликий SaaS
+const STANDARD_PIPELINE = [
+    { phaseName: "System Architecture",   assistantRole: "Chief Technology Officer", userRole: "Chief Executive Officer",  maxTurns: 2, dependsOn: [] },
+    { phaseName: "Implementation",        assistantRole: "Programmer",               userRole: "Chief Technology Officer", maxTurns: 3, dependsOn: ["System Architecture"] },
+    { phaseName: "Code Review",           assistantRole: "Code Reviewer",            userRole: "Programmer",               maxTurns: 3, dependsOn: ["Implementation"] },
+    { phaseName: "Project Documentation", assistantRole: "Technical Writer",         userRole: "Chief Executive Officer",  maxTurns: 1, dependsOn: ["Code Review"] },
 ];
 
-const FALLBACK_PIPELINE = LIGHT_PIPELINE;
+// Повний: 8+ операцій — платформа, мікросервіси, складний SaaS
+const FULL_PIPELINE = [
+    { phaseName: "Business Analysis",     assistantRole: "Chief Executive Officer",      userRole: "Chief Product Officer",    maxTurns: 2, dependsOn: [] },
+    { phaseName: "System Architecture",   assistantRole: "Chief Technology Officer",     userRole: "Chief Executive Officer",  maxTurns: 2, dependsOn: ["Business Analysis"] },
+    { phaseName: "Database Optimization", assistantRole: "Database Optimization Expert", userRole: "Chief Technology Officer", maxTurns: 2, dependsOn: ["System Architecture"] },
+    { phaseName: "Cyber Security Audit",  assistantRole: "Cyber Security Specialist",   userRole: "Chief Technology Officer", maxTurns: 2, dependsOn: ["System Architecture"] },
+    { phaseName: "Implementation",        assistantRole: "Programmer",                   userRole: "Chief Technology Officer", maxTurns: 3, dependsOn: ["Database Optimization", "Cyber Security Audit"] },
+    { phaseName: "Quality Assurance",     assistantRole: "Software Test Engineer",       userRole: "Programmer",               maxTurns: 2, dependsOn: ["Implementation"] },
+    { phaseName: "Code Review",           assistantRole: "Code Reviewer",                userRole: "Programmer",               maxTurns: 4, dependsOn: ["Quality Assurance"] },
+    { phaseName: "Project Documentation", assistantRole: "Technical Writer",             userRole: "Chief Executive Officer",  maxTurns: 1, dependsOn: ["Code Review"] },
+];
+
+const FALLBACK_PIPELINE = MICRO_PIPELINE;
 
 const DEFAULT_USER_ROLE: Record<string, string> = {
     "Chief Executive Officer":      "Chief Product Officer",
     "Chief Technology Officer":     "Chief Executive Officer",
     "Database Optimization Expert": "Chief Technology Officer",
     "Cyber Security Specialist":    "Chief Technology Officer",
+    "Frontend Developer":           "Chief Technology Officer",
     "Programmer":                   "Chief Technology Officer",
     "Software Test Engineer":       "Programmer",
     "Code Reviewer":                "Programmer",
@@ -65,11 +64,78 @@ const DEFAULT_USER_ROLE: Record<string, string> = {
 };
 
 const DEFAULT_MAX_TURNS: Record<string, number> = {
-    "Code Reviewer": 4,
-    "Programmer":    2,
+    "Code Reviewer":      4,
+    "Programmer":         3,
+    "Frontend Developer": 3,
 };
 function maxTurnsFor(role: string): number {
     return DEFAULT_MAX_TURNS[role] ?? 2;
+}
+
+// Визначає чи задача потребує фронтенд-розробника
+function detectTaskType(idea: string): { hasFrontend: boolean; hasBackend: boolean } {
+    const lower = idea.toLowerCase();
+    const frontendKeywords = [
+        'html', 'css', 'page', 'сторінк', 'site', 'сайт', 'form', 'форм',
+        'dashboard', 'дашборд', 'ui', 'ux', 'landing', 'лендінг',
+        'react', 'vue', 'angular', 'animation', 'анімац',
+        'responsive', 'адаптив', 'фронтенд', 'frontend',
+        'інтерфейс', 'interface', 'button', 'кнопк', 'menu', 'меню',
+        'modal', 'popup', 'slider', 'carousel', 'gallery', 'галере',
+    ];
+    const backendKeywords = [
+        'api', 'server', 'сервер', 'endpoint', 'rest', 'graphql',
+        'middleware', 'бекенд', 'backend', 'route', 'маршрут',
+        'express', 'fastapi', 'django', 'flask', 'nest',
+    ];
+    const hasFrontend = frontendKeywords.some(kw => lower.includes(kw));
+    const hasBackend  = backendKeywords.some(kw => lower.includes(kw));
+    return { hasFrontend, hasBackend };
+}
+
+// Адаптує статичний пайплайн під тип задачі
+function adaptPipelineForTaskType(
+    pipeline: typeof MICRO_PIPELINE,
+    taskType: { hasFrontend: boolean; hasBackend: boolean }
+): typeof MICRO_PIPELINE {
+    if (!taskType.hasFrontend) return pipeline;
+
+    return pipeline.map(step => {
+        if (step.assistantRole === "Programmer") {
+            return {
+                ...step,
+                assistantRole: "Frontend Developer",
+                phaseName: step.phaseName.replace("Implementation", "Frontend Implementation"),
+            };
+        }
+        return step;
+    });
+}
+
+function injectParallelFrontendBackend(
+    pipeline: typeof STANDARD_PIPELINE
+): typeof STANDARD_PIPELINE {
+    // Знаходимо фазу Implementation і розбиваємо на 2 паралельні
+    const implIdx = pipeline.findIndex(p => p.assistantRole === "Programmer");
+    if (implIdx === -1) return pipeline;
+
+    const original = pipeline[implIdx];
+    const before   = pipeline.slice(0, implIdx);
+    const after    = pipeline.slice(implIdx + 1);
+
+    const fePhase  = { ...original, phaseName: "Frontend Implementation", assistantRole: "Frontend Developer" };
+    const bePhase  = { ...original, phaseName: "Backend Implementation",  assistantRole: "Programmer" };
+
+    // Code Review залежить від обох
+    const reviewIdx = after.findIndex(p => p.assistantRole === "Code Reviewer");
+    if (reviewIdx !== -1) {
+        after[reviewIdx] = {
+            ...after[reviewIdx],
+            dependsOn: ["Frontend Implementation", "Backend Implementation"],
+        };
+    }
+
+    return [...before, fePhase, bePhase, ...after];
 }
 
 async function runSetupWizard(config: vscode.WorkspaceConfiguration): Promise<boolean> {
@@ -211,6 +277,7 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
     }
 
     isExecuting = true;
+    let currentTaskComplexity: string = "Low";
     const config  = vscode.workspace.getConfiguration('openaistudio');
     const vllmUrl = config.get<string>('vllmUrl', '');
     if (!vllmUrl) { isExecuting = false; vscode.window.showErrorMessage('❌ vLLM URL не вказано.'); return; }
@@ -220,9 +287,8 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
     ChatWebview.createOrShow(context.extensionUri);
     ChatWebview.currentPanel?.notifyStart();
 
-    // Reset complexity for the new task
-    VLLMModelBackend.currentTaskComplexity = "Low";
-
+    // FIX Bug #2: reset ПІСЛЯ CEO, не до. (Safe fallback default)
+    currentTaskComplexity = "Low";
 
     let fullExecutionPrompt = idea;
     if (globalSessionContext) {
@@ -236,28 +302,51 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
     const chatChain = new ChatChain();
     chatChain.onEvent = (ev) => ChatWebview.currentPanel?.broadcastEvent(ev);
 
-    ChatWebview.currentPanel?.broadcastEvent({ type: 'narration', content: `🔍 Аналізую задачу та будую DAG...` });
+    // 2. Детектор типу задачі
+    const taskType = detectTaskType(idea);
+    if (taskType.hasFrontend) {
+        ChatWebview.currentPanel?.broadcastEvent({
+            type: 'narration', content: `🎨 Виявлено UI/Frontend задачу → підключаю Frontend Developer`
+        });
+    }
 
-    // FIX: reset complexity at start of every run
-    VLLMModelBackend.currentTaskComplexity = "High";
+    ChatWebview.currentPanel?.broadcastEvent({ type: 'narration', content: `🔍 Аналізую задачу та будую DAG...` });
 
     interface DagPhase { name: string; role: string; dependsOn: string[]; }
     let dagPhases: DagPhase[] = [];
 
-    // FIX: roles in quotes so model copies them exactly; stronger enforcement
-    const availableRoles = Object.keys(roleConfig).map(r => `"${r}"`).join(', ');
+    // FIX Bug #3: roles in quotes so model copies them exactly; stronger enforcement
+    const availableRoles = Object.keys(roleConfig).join(', ');
 
-    const ceoSystemPrompt = `Your goal is to complete the task: ${idea}\n` +
-                "You have access to specialized roles specified in RoleConfig.json.\n" +
-                "PRELIMINARY EVALUATION: Estimate the number of 'distinct developer operations' (e.g. creating a file, auditing security, optimizing DB).\n" +
-                "LIGHT PROJECTS (Estimated operations < 5): Use 3 roles (Programmer, Code Reviewer, Technical Writer).\n" +
-                "HEAVY PROJECTS (Estimated operations >= 5): Use 8 roles (CEO, CTO, DB Expert, Security, Programmer, Test Engineer, Code Reviewer, Technical Writer).\n" +
-                "IMPORTANT: If the task is a simple game or script, choose LIGHT PROJECTS and SKIP Database/Security roles.\n" +
-                "Return ONLY valid JSON including 'estimated_operations' (integer), 'justification' (short string), 'complexity' ('Low' or 'High'), and 'plan' (an array of phases).\n" +
-                "IMPORTANT: Respond ONLY with a valid JSON object.";
+    const ceoSystemPrompt = [
+        `TASK: "${idea}"`,
+        `Available roles: ${availableRoles}`,
+        ``,
+        `Analyze the task and return ONLY valid JSON with these fields:`,
+        `- estimated_operations: integer (count of distinct dev operations)`,
+        `- justification: string (one sentence explaining the count)`,
+        `- complexity: "Micro" | "Standard" | "Full"`,
+        `  * Micro  = 1-3 ops  (single file, script, simple game)`,
+        `  * Standard = 4-7 ops  (REST API, small app with DB)`,
+        `  * Full  = 8+ ops  (platform, microservices, complex SaaS)`,
+        `- has_frontend: boolean (does task need UI/HTML/CSS work?)`,
+        `- has_backend: boolean (does task need server/API work?)`,
+        `- plan: array of phases, each: { name, role, dependsOn: string[] }`,
+        `  Use ONLY roles from the Available roles list above.`,
+        `IMPORTANT: Respond ONLY with a valid JSON object.`
+    ].join('\n');
 
     let contextForCEO = globalSessionContext;
-    if (contextForCEO.length > 2000) contextForCEO = contextForCEO.substring(contextForCEO.length - 2000);
+    if (contextForCEO.length > 2000) {
+        const startIdx = contextForCEO.length - 2000;
+        const nextNewline = contextForCEO.indexOf('\n', startIdx);
+        // If newline found and it's not too far (within 200 chars), use it as clean start
+        if (nextNewline !== -1 && nextNewline < startIdx + 200) {
+            contextForCEO = contextForCEO.substring(nextNewline + 1);
+        } else {
+            contextForCEO = contextForCEO.substring(startIdx);
+        }
+    }
     const ceoUserMsg = `TASK: "${idea}"\n\n${contextForCEO ? `=== PREVIOUS SESSION CONTEXT ===\n${contextForCEO}` : ""}`;
 
     try {
@@ -266,29 +355,40 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
             { role: "user", content: `${ceoSystemPrompt}\n\n${ceoUserMsg}` }
         ]);
 
-        let cleaned = response.trim();
-        const fenced = cleaned.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-        if (fenced) cleaned = fenced[1];
-
+        let cleaned = response.trim().replace(/```(?:json)?\s*([\s\S]*?)\s*```/g, '$1');
         const parsed = JSON.parse(cleaned);
 
-        if (parsed.estimated_operations !== undefined) {
-            const ops = Number(parsed.estimated_operations);
-            VLLMModelBackend.currentTaskComplexity = ops >= 5 ? "High" : "Low";
-            console.log(`CEO Analysis: Estimated Operations = ${ops}, Complexity = ${VLLMModelBackend.currentTaskComplexity}`);
-        } else if (parsed.complexity) {
-            VLLMModelBackend.currentTaskComplexity =
-                String(parsed.complexity).toLowerCase() === "low" ? "Low" : "High";
-        }
+        // 4. Визначити складність із трьох рівнів
+        const ops = Number(parsed.estimated_operations ?? 0);
+        const c = String(parsed.complexity ?? "").toLowerCase();
+        if      (ops <= 3 || c === "micro")     currentTaskComplexity = "Low";
+        else if (ops <= 7 || c === "standard")  currentTaskComplexity = "Medium";
+        else                                     currentTaskComplexity = "High";
 
-        if (Array.isArray(parsed.phases) && parsed.phases.length > 0) {
+        console.log(`CEO Analysis: Ops=${ops}, Complex=${currentTaskComplexity}, FE=${parsed.has_frontend}, BE=${parsed.has_backend}`);
+
+        // Врахувати CEO-детекцію типу задачі
+        const ceoDetectedFE = parsed.has_frontend === true;
+        const effectiveTaskType = {
+            hasFrontend: taskType.hasFrontend || ceoDetectedFE,
+            hasBackend:  taskType.hasBackend  || parsed.has_backend === true,
+        };
+
+        // FIX Bug #1: support both 'plan' and 'phases'
+        const rawPlan = parsed.plan ?? parsed.phases;
+        if (Array.isArray(rawPlan) && rawPlan.length > 0) {
             const knownRoles = new Set(Object.keys(roleConfig));
 
             // FIX: remap unknown/hallucinated roles to nearest known role
-            dagPhases = parsed.phases
+            dagPhases = rawPlan
                 .filter((p: any) => p && typeof p.name === 'string' && typeof p.role === 'string')
                 .map((p: any) => {
                     let role = p.role.trim();
+                    // Автозаміна Programmer → Frontend Developer якщо треба
+                    if (role === "Programmer" && effectiveTaskType.hasFrontend && !effectiveTaskType.hasBackend) {
+                        role = "Frontend Developer";
+                    }
+
                     if (!knownRoles.has(role)) {
                         const r = role.toLowerCase();
                         if      (r.includes('frontend') || r.includes('ui') || r.includes('design')) role = 'Frontend Developer';
@@ -311,11 +411,13 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
             ).join('\n');
             ChatWebview.currentPanel?.broadcastEvent({
                 type: 'narration',
-                content: `⚙️ Динамічний DAG (складність: ${VLLMModelBackend.currentTaskComplexity}):\n${planStr}`
+                content: `⚙️ Динамічний DAG (складність: ${currentTaskComplexity}):\n${planStr}`
             });
         }
     } catch (e) {
-        console.error("CEO DAG analysis failed, using fallback pipeline:", e);
+        console.error("CEO DAG analysis failed, fallback to Micro:", e);
+        // FIX Bug #2: single reset in catch as safe fallback
+        currentTaskComplexity = "Low";
         ChatWebview.currentPanel?.broadcastEvent({
             type: 'narration', content: `⚠️ CEO аналіз не вдався — використовую стандартний план.`
         });
@@ -332,11 +434,19 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
 
     if (dagPhases.length === 0) {
         // Fallback or explicit simple task logic
-        const isVerySimple = idea.length < 50; // Only use ultra-short for absolute fallback
+        const isVerySimple = idea.length < 50;
 
-        plan = (isVerySimple || VLLMModelBackend.currentTaskComplexity === "Low") 
-            ? LIGHT_PIPELINE 
-            : HEAVY_PIPELINE;
+        let basePipeline =
+            currentTaskComplexity === "High"   ? FULL_PIPELINE     :
+            currentTaskComplexity === "Medium" ? STANDARD_PIPELINE :
+                                      MICRO_PIPELINE;
+
+        plan = adaptPipelineForTaskType(basePipeline, taskType) as any;
+        
+        // Якщо є і frontend і backend → додати паралельні фази
+        if (taskType.hasFrontend && taskType.hasBackend && currentTaskComplexity !== "Low") {
+            plan = injectParallelFrontendBackend(plan as any) as any;
+        }
 
         for (const step of plan) {
             const assistantDetail = getRoleDetail(roleConfig, step.assistantRole);
@@ -350,7 +460,7 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
                     userDetail.prompt,
                     step.maxTurns,
                     assistantDetail.model,
-                    VLLMModelBackend.currentTaskComplexity,
+                    currentTaskComplexity,
                     assistantDetail.skills
                 ),
                 step.dependsOn
@@ -358,19 +468,19 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
         }
     } else {
         for (const p of dagPhases) {
-            const assistantDetail = getRoleDetail(roleConfig, p.role); // Use p.role for assistant
-            const userRole        = DEFAULT_USER_ROLE[p.role] ?? "Chief Product Officer"; // Determine user role based on assistant
+            const assistantDetail = getRoleDetail(roleConfig, p.role);
+            const userRole        = DEFAULT_USER_ROLE[p.role] ?? "Chief Product Officer";
             const userDetail      = getRoleDetail(roleConfig, userRole);
 
             const phase = new Phase(
-                p.name, // Use p.name for phaseName
-                p.role, // Use p.role for assistantRole
+                p.name,
+                p.role,
                 userRole,
                 assistantDetail.prompt,
                 userDetail.prompt,
-                maxTurnsFor(p.role), // Use p.role for maxTurns
-                assistantDetail.model, // New: Pass model from config
-                VLLMModelBackend.currentTaskComplexity,
+                maxTurnsFor(p.role),
+                assistantDetail.model,
+                currentTaskComplexity,
                 assistantDetail.skills
             );
             chatChain.addPhase(phase, p.dependsOn);

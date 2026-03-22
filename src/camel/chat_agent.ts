@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Юрій Кучеренко.
 import { VLLMModelBackend } from "./model_backend";
 import { ChatMessage, RoleType } from "./typing";
 import { parseToolCall, executeTool } from "../chatdev/tools";
@@ -38,6 +39,16 @@ export class ChatAgent {
         onToken?: (token: string) => void
     ): Promise<string> {
         this.memory.push({ role: "user", content: incomingMessage });
+
+        // FIX: Memory leak prevention - trim memory if it gets too long.
+        // Keep system message (index 0) + last 30 messages.
+        const MAX_MEMORY = 30;
+        if (this.memory.length > MAX_MEMORY + 1) {
+            // Remove messages starting from index 1 (after system)
+            // number of items to remove = current length - system - max allowed
+            const toRemove = this.memory.length - (MAX_MEMORY + 1);
+            this.memory.splice(1, toRemove);
+        }
 
         let responseText = await this.backend.step(this.memory, temperature, onToken);
 
