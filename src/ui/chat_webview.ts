@@ -20,12 +20,15 @@ export class ChatWebview {
 
         this._panel.webview.onDidReceiveMessage(async (msg) => {
             switch (msg.type) {
+                case 'set_lang':
+                    if (msg.lang) {
+                        const cfg = vscode.workspace.getConfiguration('openaistudio');
+                        await cfg.update('uiLanguage', msg.lang, vscode.ConfigurationTarget.Global);
+                    }
+                    break;
+
                 case 'run_task':
                     if (msg.text) {
-                        if (msg.lang) {
-                            const cfg = vscode.workspace.getConfiguration('openaistudio');
-                            await cfg.update('uiLanguage', msg.lang, vscode.ConfigurationTarget.Global);
-                        }
                         vscode.commands.executeCommand('openaistudio.startTaskFromWebview', msg.text);
                     }
                     break;

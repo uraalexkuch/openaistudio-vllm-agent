@@ -154,11 +154,108 @@
   let currentThinkEl = null;
   let currentAnswerStreamEl = null;
 
+  const I18N = {
+    uk: {
+      placeholder: "Постав завдання агенту…",
+      clear: "Очистити",
+      title: "OPENAISTUDIO",
+      emptyTitle: "OpenAI Studio Agent",
+      hint1: "📁 Поясни структуру цього проєкту",
+      hint2: "🐛 Знайди та виправ баги",
+      thinking: "Думаємо…",
+      process: "ПРОЦЕС",
+      clickExpand: "(натисніть щоб розгорнути)",
+      agent: "АГЕНТ",
+      toolCall: "ВИКЛИК ІНСТРУМЕНТУ",
+      result: "РЕЗУЛЬТАТ",
+    },
+    en: {
+      placeholder: "Give the agent a task…",
+      clear: "Clear",
+      title: "OPENAISTUDIO",
+      emptyTitle: "OpenAI Studio Agent",
+      hint1: "📁 Explain this project structure",
+      hint2: "🐛 Find and fix bugs",
+      thinking: "Thinking…",
+      process: "PROCESS",
+      clickExpand: "(click to expand)",
+      agent: "AGENT",
+      toolCall: "TOOL CALL",
+      result: "RESULT",
+    },
+    de: {
+      placeholder: "Gib dem Agenten eine Aufgabe…",
+      clear: "Löschen",
+      title: "OPENAISTUDIO",
+      emptyTitle: "OpenAI Studio Agent",
+      hint1: "📁 Erkläre die Projektstruktur",
+      hint2: "🐛 Fehler finden und beheben",
+      thinking: "Denke…",
+      process: "PROZESS",
+      clickExpand: "(zum Erweitern klicken)",
+      agent: "AGENT",
+      toolCall: "TOOL-AUFRUF",
+      result: "ERGEBNIS",
+    },
+    fr: {
+      placeholder: "Donnez une tâche à l'agent…",
+      clear: "Effacer",
+      title: "OPENAISTUDIO",
+      emptyTitle: "OpenAI Studio Agent",
+      hint1: "📁 Expliquer la structure du projet",
+      hint2: "🐛 Trouver et corriger les bugs",
+      thinking: "Réflexion…",
+      process: "PROCESSUS",
+      clickExpand: "(cliquer pour développer)",
+      agent: "AGENT",
+      toolCall: "APPEL D'OUTIL",
+      result: "RÉSULTAT",
+    },
+    pl: {
+      placeholder: "Daj agentowi zadanie…",
+      clear: "Wyczyść",
+      title: "OPENAISTUDIO",
+      emptyTitle: "OpenAI Studio Agent",
+      hint1: "📁 Wyjaśnij strukturę projektu",
+      hint2: "🐛 Znajdź i napraw błędy",
+      thinking: "Myślę…",
+      process: "PROCES",
+      clickExpand: "(kliknij aby rozwinąć)",
+      agent: "AGENT",
+      toolCall: "WYWOŁANIE NARZĘDZIA",
+      result: "WYNIK",
+    },
+  };
+
+  let currentLanguage = 'uk';
+
+  function applyLang(code) {
+    const t = I18N[code] || I18N['uk'];
+    currentLanguage = code;
+    document.getElementById('header-title').textContent = t.title;
+    document.getElementById('btn-clear').textContent = t.clear;
+    inputEl.placeholder = t.placeholder;
+    const emptyTitle = document.querySelector('#empty .title');
+    if (emptyTitle) emptyTitle.textContent = t.emptyTitle;
+    const hints = document.querySelectorAll('#empty .hint');
+    if (hints[0]) { hints[0].textContent = t.hint1; hints[0].dataset.hint = t.hint1.replace(/^📁 /, ''); }
+    if (hints[1]) { hints[1].textContent = t.hint2; hints[1].dataset.hint = t.hint2.replace(/^🐛 /, ''); }
+    const thinkLabel = document.getElementById('thinking-step');
+    if (thinkLabel && (thinkLabel.textContent.startsWith('Думаємо') || thinkLabel.textContent.startsWith('Thinking') || thinkLabel.textContent.startsWith('Denke') || thinkLabel.textContent.startsWith('Réflexion') || thinkLabel.textContent.startsWith('Myślę'))) {
+      thinkLabel.textContent = t.thinking;
+    }
+  }
+
+  langSelect.addEventListener('change', () => {
+    applyLang(langSelect.value);
+    vscode.postMessage({ type: 'set_lang', lang: langSelect.value });
+  });
+
   function send() {
     const text = inputEl.value.trim();
     if (!text) return;
     inputEl.value = '';
-    vscode.postMessage({ type: 'run_task', text, lang: langSelect.value });
+    vscode.postMessage({ type: 'run_task', text });
   }
 
   btnSend.onclick = send;
@@ -173,8 +270,9 @@
     const data = e.data;
     if (data.type === 'models_list') {
         modelSelect.innerHTML = data.models.map(m => `<option value="${m}" ${m===data.current ? 'selected':''}>${m}</option>`).join('');
-        if (data.currentLang) {
+        if (data.currentLang && I18N[data.currentLang]) {
             langSelect.value = data.currentLang;
+            applyLang(data.currentLang);
         }
     } else if (data.type === 'task_start') {
         emptyEl.style.display = 'none';
@@ -192,15 +290,16 @@
             chatEl.appendChild(wrap);
         } else if (ev.type === 'thinking') {
             thinkLive.style.display = 'flex';
+            const t = I18N[currentLanguage] || I18N['uk'];
             const modelTag = ev.model ? ` [${ev.model}]` : "";
-            document.getElementById('thinking-step').textContent = (ev.content || "Думаємо...") + modelTag;
+            document.getElementById('thinking-step').textContent = (ev.content || t.thinking) + modelTag;
             
             if (!currentThinkEl) {
                 const wrap = document.createElement('div');
                 wrap.className = 'msg msg-thinking collapsed';
                 wrap.onclick = () => wrap.classList.toggle('collapsed');
                 const labelModel = ev.model ? ` <small style="opacity:0.6">(${ev.model})</small>` : "";
-                wrap.innerHTML = `<div class="msg-label">ПРОЦЕС ${labelModel} (натисніть щоб розгорнути)</div><div class="msg-body"></div>`;
+                wrap.innerHTML = `<div class="msg-label">${t.process}${labelModel} ${t.clickExpand}</div><div class="msg-body"></div>`;
                 chatEl.appendChild(wrap);
                 currentThinkEl = wrap.querySelector('.msg-body');
             }
@@ -232,7 +331,8 @@
             currentThinkEl = null;
             const wrap = document.createElement('div');
             wrap.className = 'msg msg-answer';
-            const roleLabel = ev.role ? ev.role.toUpperCase() : "АГЕНТ";
+            const t = I18N[currentLanguage] || I18N['uk'];
+            const roleLabel = ev.role ? ev.role.toUpperCase() : t.agent;
             const modelTag = ev.model ? ` <span style="font-size: 9px; opacity: 0.5; margin-left:8px;">${ev.model}</span>` : "";
             
             const labelDiv = document.createElement('div');
