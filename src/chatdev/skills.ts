@@ -349,10 +349,13 @@ function buildSkillMeta(filePath: string, skillsPath: string): SkillMeta {
   };
 }
 
+const META_SKILLS = new Set(['clean-code', 'coding-standards', 'code-style']);
+
 export async function autoLoadSkillsForTask(
     task: string,
     workspaceContext = '',
     maxSkills = 2,
+    excludeMeta = false,
 ): Promise<LoadedSkill[]> {
   const combined = [task, workspaceContext].filter(Boolean).join('\n');
   if (!combined.trim()) return [];
@@ -362,18 +365,30 @@ export async function autoLoadSkillsForTask(
   const primaryMin  = tokenCount <= 5 ? 5 : tokenCount <= 15 ? 7 : 10;
   const fallbackMin = Math.max(3, primaryMin - 3);
 
-  const allScored = scanAndScoreAllSkillsIdf(combined, new Set(), primaryMin);
+  let allScored = scanAndScoreAllSkillsIdf(combined, new Set(), primaryMin);
+  
   if (allScored.length === 0) {
     const fallback = scanAndScoreAllSkillsIdf(combined, new Set(), fallbackMin);
     if (fallback.length > 0) {
       console.log(`[Skills] Using adaptive fallback threshold (${fallbackMin}): ${fallback.slice(0, maxSkills).map(s => s.name).join(', ')}`);
-      return loadTopSkills(fallback, maxSkills);
+      allScored = fallback;
+    } else {
+      console.log(`[Skills] No relevant skills found. Proceeding without skills.`);
+      return [];
     }
-    console.log(`[Skills] No relevant skills found. Proceeding without skills.`);
-    return [];
   }
 
-  return loadTopSkills(allScored, maxSkills);
+  let result = loadTopSkills(allScored, maxSkills);
+  
+  if (excludeMeta) {
+    const originalCount = result.length;
+    result = result.filter(s => !META_SKILLS.has(s.folderName.toLowerCase()));
+    if (result.length < originalCount) {
+      console.log(`[Skills] Filtered out meta-skills. Remaining: ${result.map(s => s.name).join(', ')}`);
+    }
+  }
+
+  return result;
 }
 
 export async function saveSkill(

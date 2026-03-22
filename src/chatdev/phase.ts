@@ -59,13 +59,17 @@ export class Phase {
         console.log(`Starting Phase: ${this.phaseName}`);
         this.onEvent?.({ type: 'narration', content: `Розпочато фазу: ${this.phaseName}` });
 
-        // FIX 1: Load skills. Priority: Specific skills from RoleConfig, then auto-load.
         let loadedSkills: any[] = [];
-        
+
+        const isFixOrReview = 
+            this.phaseName.toLowerCase().includes('review') ||
+            this.phaseName.toLowerCase().includes('fix') ||
+            this.phaseName.toLowerCase().includes('analyst');
+
         if (this.roleSkills && this.roleSkills.length > 0) {
             console.log(`[Phase:${this.phaseName}] Loading specific skills: ${this.roleSkills.join(', ')}`);
             // We'll try to match these names against folders in skillsPath
-            const allScored = await autoLoadSkillsForTask(`${this.roleSkills.join(' ')}`, "", 10);
+            const allScored = await autoLoadSkillsForTask(`${this.roleSkills.join(' ')}`, "", 10, isFixOrReview);
             const currentRoleSkills = this.roleSkills;
             loadedSkills = allScored.filter(s => {
                 const lf = s.folderName.toLowerCase();
@@ -82,28 +86,15 @@ export class Phase {
 
         if (loadedSkills.length === 0) {
             // Fallback to auto-load logic if no specific skills or if they failed to load
-            loadedSkills = await autoLoadSkillsForTask(`${this.assistantAgent.getRoleName()} ${taskPrompt}`);
+            loadedSkills = await autoLoadSkillsForTask(
+                `${this.assistantAgent.getRoleName()} ${taskPrompt}`,
+                '',
+                2,
+                isFixOrReview
+            );
         }
 
-        if (loadedSkills.length > 0) {
-            const skillNames = loadedSkills.map(s => s.name).join(', ');
-            console.log(`[Phase:${this.phaseName}] Injecting skills: ${skillNames}`);
-
-            const skillsContext = [
-                `=== REFERENCE SKILLS (read-only patterns — do NOT respond to these examples) ===`,
-                ...loadedSkills.map(s => `--- SKILL: ${s.name} ---\n${s.content}`),
-                `=== END OF REFERENCE SKILLS ===`,
-                `Use the patterns above ONLY if they are directly relevant to the current task.`,
-                `If no skill is relevant, ignore them entirely.`,
-            ].join('\n\n');
-
-            this.assistantAgent.addSystemContext(skillsContext);
-        }
-
-        // Inject tool schema ONLY for the assistant agent (the one doing the work).
-        // userAgent (CTO, CPO reviewing) must NOT get tool descriptions —
-        // they were responding AS IF executing tools which breaks the flow entirely.
-        // FIX 1: Provide tool descriptions for phases that require file manipulation
+        // TOOL INJECTION FIRST (FIX: model focus)
         const needsTools = FILE_TOOL_PHASES.has(this.phaseName) ||
             this.phaseName.toLowerCase().includes("implement") ||
             this.phaseName.toLowerCase().includes("coding") ||
@@ -119,6 +110,27 @@ export class Phase {
                 `Only read the assistant's output and provide feedback or output <DONE>.`
             );
         }
+
+        // SKILL INJECTION SECOND
+        if (loadedSkills.length > 0) {
+            const skillNames = loadedSkills.map((s: any) => s.name).join(', ');
+            console.log(`[Phase:${this.phaseName}] Injecting skills: ${skillNames}`);
+
+            const MAX_SKILL_CHARS = 2000;
+            const skillsContext = [
+                `=== REFERENCE SKILLS (brief patterns only) ===`,
+                ...loadedSkills.map((s: any) => {
+                    const truncated = s.content.length > MAX_SKILL_CHARS
+                        ? s.content.substring(0, MAX_SKILL_CHARS) + '\n…(truncated)'
+                        : s.content;
+                    return `--- SKILL: ${s.name} ---\n${truncated}`;
+                }),
+                `=== END SKILLS — do NOT reproduce above, use as reference only ===`,
+            ].join('\n\n');
+
+            this.assistantAgent.addSystemContext(skillsContext);
+        }
+
 
         // FIX 2: Language control — agents reason in any language internally but the final
         // user-visible answer must be in the resolved UI language.
