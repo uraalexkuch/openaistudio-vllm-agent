@@ -292,7 +292,11 @@
             thinkLive.style.display = 'flex';
             const t = I18N[currentLanguage] || I18N['uk'];
             const modelTag = ev.model ? ` [${ev.model}]` : "";
-            document.getElementById('thinking-step').textContent = (ev.content || t.thinking) + modelTag;
+            // Скорочена версія контенту для індикатора
+            const shortContent = (ev.content || t.thinking)
+                .replace(/^\[.*?\]\s*/, '')  // видалити [RoleName]
+                .substring(0, 60);
+            document.getElementById('thinking-step').textContent = shortContent + modelTag;
             
             if (!currentThinkEl) {
                 const wrap = document.createElement('div');
@@ -363,6 +367,45 @@
                 }
                 delete streamEls[phase];
             }
+        } else if (ev.type === 'tool_call') {
+            // Показати який інструмент викликається
+            thinkLive.style.display = 'none';
+            const wrap = document.createElement('div');
+            wrap.className = 'msg msg-tool';
+            const argsStr = ev.toolArgs ? JSON.stringify(ev.toolArgs, null, 2) : '';
+            const shortArgs = argsStr.length > 120 ? argsStr.substring(0, 120) + '…' : argsStr;
+            wrap.innerHTML = `
+                <div class="msg-label" style="color:#f59e0b">
+                    <span class="dot" style="background:#f59e0b"></span>
+                    🔧 ${(ev.role || 'AGENT').toUpperCase()} → TOOL CALL
+                </div>
+                <div class="msg-body" style="background:#1a1510;border-left-color:#f59e0b">
+                    <div class="tool-name">${ev.toolName || '?'}</div>
+                    <div class="tool-args">${shortArgs}</div>
+                </div>`;
+            chatEl.appendChild(wrap);
+            chatEl.scrollTop = chatEl.scrollHeight;
+
+        } else if (ev.type === 'tool_result') {
+            // Показати результат виконання інструменту
+            const wrap = document.createElement('div');
+            wrap.className = 'msg msg-result';
+            const content = ev.content || '';
+            const lines = content.split('\n');
+            // Показати перші 8 рядків
+            const preview = lines.slice(0, 8).join('\n');
+            const hasMore = lines.length > 8;
+            wrap.innerHTML = `
+                <div class="msg-label" style="color:#475569">
+                    ✅ ${ev.toolName || 'result'} 
+                    <span style="font-size:9px;opacity:0.6;margin-left:6px">${lines.length} рядків</span>
+                </div>
+                <div class="msg-body" style="background:#131618;border-left-color:#22c55e;
+                     font-family:'Courier New',monospace;font-size:11px;
+                     white-space:pre-wrap;max-height:160px;overflow-y:auto">
+${preview}${hasMore ? '\n…' : ''}</div>`;
+            chatEl.appendChild(wrap);
+            chatEl.scrollTop = chatEl.scrollHeight;
         } else if (ev.type === 'done') {
             btnSend.style.display = 'flex';
             btnStop.style.display = 'none';
