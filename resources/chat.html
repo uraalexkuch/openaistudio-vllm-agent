@@ -372,12 +372,13 @@
             thinkLive.style.display = 'none';
             const wrap = document.createElement('div');
             wrap.className = 'msg msg-tool';
+            const phaseLabel = ev._phase ? ` <span style="font-size: 8px; opacity: 0.5;">[${ev._phase}]</span>` : "";
             const argsStr = ev.toolArgs ? JSON.stringify(ev.toolArgs, null, 2) : '';
             const shortArgs = argsStr.length > 120 ? argsStr.substring(0, 120) + '…' : argsStr;
             wrap.innerHTML = `
                 <div class="msg-label" style="color:#f59e0b">
                     <span class="dot" style="background:#f59e0b"></span>
-                    🔧 ${(ev.role || 'AGENT').toUpperCase()} → TOOL CALL
+                    🔧 ${(ev.role || 'AGENT').toUpperCase()}${phaseLabel} → TOOL CALL
                 </div>
                 <div class="msg-body" style="background:#1a1510;border-left-color:#f59e0b">
                     <div class="tool-name">${ev.toolName || '?'}</div>
@@ -390,6 +391,7 @@
             // Показати результат виконання інструменту
             const wrap = document.createElement('div');
             wrap.className = 'msg msg-result';
+            const phaseLabel = ev._phase ? ` <span style="font-size: 8px; opacity: 0.5;">[${ev._phase}]</span>` : "";
             const content = ev.content || '';
             const lines = content.split('\n');
             // Показати перші 8 рядків
@@ -397,7 +399,7 @@
             const hasMore = lines.length > 8;
             wrap.innerHTML = `
                 <div class="msg-label" style="color:#475569">
-                    ✅ ${ev.toolName || 'result'} 
+                    ✅ ${ev.toolName || 'result'}${phaseLabel}
                     <span style="font-size:9px;opacity:0.6;margin-left:6px">${lines.length} рядків</span>
                 </div>
                 <div class="msg-body" style="background:#131618;border-left-color:#22c55e;

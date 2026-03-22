@@ -9,6 +9,7 @@ export class ChatAgent {
     private systemMessage: ChatMessage;
     private memory: ChatMessage[];
     private backend: VLLMModelBackend;
+    private readHistory: Set<string> = new Set();
     public onEvent?: (ev: any) => void;
 
     constructor(
@@ -50,7 +51,8 @@ export class ChatAgent {
             this.memory.splice(1, toRemove);
         }
 
-        let responseText = await this.backend.step(this.memory, temperature, onToken);
+        let responseRaw = await this.backend.step(this.memory, temperature, onToken);
+        let responseText = stripFakeResults(responseRaw);
 
         // ── Tool execution loop ───────────────────────────────────────────────
         // Each tool call is executed, result injected, and model called again.
@@ -81,7 +83,15 @@ export class ChatAgent {
                 role: this.roleName,
             });
 
-            const toolResult = await executeTool(toolCall);
+            let toolResult: string = "";
+            const filePath = toolArgs.filename || toolArgs.file || toolArgs.path;
+
+            if (toolName === 'read_file' && filePath && this.readHistory.has(filePath)) {
+                toolResult = `FILE [${filePath}] ALREADY READ. Content is in context history above. DO NOT read same file twice. Proceed to analysis or other files.`;
+            } else {
+                if (toolName === 'read_file' && filePath) this.readHistory.add(filePath);
+                toolResult = await executeTool(toolCall);
+            }
 
             // Broadcast tool_result event to UI so user sees what happened
             this.onEvent?.({
@@ -109,7 +119,8 @@ export class ChatAgent {
                 model: this.backend.getModelName(),
             });
 
-            responseText = await this.backend.step(this.memory, temperature, onToken);
+            let nextResponseRaw = await this.backend.step(this.memory, temperature, onToken);
+            responseText = stripFakeResults(nextResponseRaw);
 
             this.onEvent?.({ type: 'answer_stream_end' });
 
@@ -125,4 +136,27 @@ export class ChatAgent {
     getRoleName(): string { return this.roleName; }
     getModelName(): string { return this.backend.getModelName(); }
     getMemory(): ChatMessage[] { return this.memory; }
+}
+
+/**
+ * Truncates text after XML tool call tags or code blocks to prevent hallucinated results.
+ */
+function stripFakeResults(text: string): string {
+    const xmlEnd = text.indexOf('</tool_call>');
+    if (xmlEnd !== -1) return text.substring(0, xmlEnd + 12);
+
+    const jsonEnd = text.match(/```(?:tool_code|json|tool)?\s*\{[\s\S]*?\}\s*```/i);
+    if (jsonEnd) {
+        const lastIndex = text.indexOf(jsonEnd[0]) + jsonEnd[0].length;
+        return text.substring(0, lastIndex);
+    }
+
+    const pyCall = text.match(/\b([a-z_]+)\s*\(([^)]*)\)/i);
+    if (pyCall) {
+        // Truncate after first Python call line
+        const idx = text.indexOf(pyCall[0]) + pyCall[0].length;
+        return text.substring(0, idx);
+    }
+
+    return text;
 }

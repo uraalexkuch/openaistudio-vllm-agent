@@ -352,7 +352,7 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
         }
     }
 
-    if (globalSessionContext) {
+    if (globalSessionContext && taskCtx.intent === 'create') {
         fullExecutionPrompt = `Історія попередніх сесій:\n${globalSessionContext}\nНове завдання: ${taskCtx.description}`;
         ChatWebview.currentPanel?.broadcastEvent({ type: 'narration', content: `🔄 Продовження роботи над проектом` });
     } else {
@@ -417,12 +417,15 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
     const chatChain = new ChatChain();
     chatChain.onEvent = (ev) => ChatWebview.currentPanel?.broadcastEvent(ev);
 
-    // 2. Детектор типу задачі
-    const taskType = detectTaskType(idea);
-    if (taskType.hasFrontend) {
-        ChatWebview.currentPanel?.broadcastEvent({
-            type: 'narration', content: `🎨 Виявлено UI/Frontend задачу → підключаю Frontend Developer`
-        });
+    // 2. Детектор типу задачі (тільки для створенння або нових фіч)
+    let taskType = { hasFrontend: false, hasBackend: false };
+    if (taskCtx.intent === 'create' || taskCtx.intent === 'add_feature') {
+        taskType = detectTaskType(idea);
+        if (taskType.hasFrontend) {
+            ChatWebview.currentPanel?.broadcastEvent({
+                type: 'narration', content: `🎨 Виявлено UI/Frontend задачу → підключаю Frontend Developer`
+            });
+        }
     }
 
     ChatWebview.currentPanel?.broadcastEvent({ type: 'narration', content: `🔍 Аналізую задачу та будую DAG...` });

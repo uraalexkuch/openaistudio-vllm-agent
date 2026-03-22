@@ -112,11 +112,28 @@ export class Phase {
             this.phaseName.toLowerCase().includes('guide');
 
         // TOOL INJECTION FIRST (FIX: model focus)
-        const needsTools = isAnalystPhase || isDocPhase ||
+        const assistantRoleLower = this.assistantAgent.getRoleName().toLowerCase();
+        const phaseNameLower = this.phaseName.toLowerCase();
+
+        const needsToolsByPhase = 
             FILE_TOOL_PHASES.has(this.phaseName) ||
-            this.phaseName.toLowerCase().includes("implement") ||
-            this.phaseName.toLowerCase().includes("coding") ||
-            this.phaseName.toLowerCase().includes("review");
+            phaseNameLower.includes("implement") ||
+            phaseNameLower.includes("coding") ||
+            phaseNameLower.includes("review") ||
+            phaseNameLower.includes("security") ||
+            phaseNameLower.includes("audit") ||
+            phaseNameLower.includes("backend") ||
+            phaseNameLower.includes("frontend") ||
+            phaseNameLower.includes("database") ||
+            phaseNameLower.includes("design");
+
+        const needsToolsByRole = 
+            assistantRoleLower.includes("programmer") || 
+            assistantRoleLower.includes("developer") ||
+            assistantRoleLower.includes("specialist") ||
+            assistantRoleLower.includes("engineer");
+
+        const needsTools = isAnalystPhase || isDocPhase || needsToolsByPhase || needsToolsByRole;
 
         if (needsTools) {
             this.assistantAgent.addSystemContext(getToolsDescription());

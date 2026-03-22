@@ -1,3 +1,6 @@
+import * as path from 'path';
+import * as fs from 'fs';
+
 export type TaskIntent = 'create' | 'explain' | 'fix' | 'refactor' | 'add_feature' | 'document';
 
 export interface TaskContext {
@@ -52,6 +55,24 @@ function extractPath(text: string): string | null {
 }
 
 /**
+ * Якщо шлях веде до файлу (має розширення або fs.isFile), повертає його батьківську директорію.
+ */
+function normalizeDirPath(p: string | null): string | null {
+    if (!p) return p;
+    try {
+        if (fs.existsSync(p) && fs.statSync(p).isFile()) {
+            return path.dirname(p);
+        }
+    } catch {}
+
+    // Fallback: якщо в кінці є розширення типу .ts, .md, .php — відрізаємо
+    if (/\.[a-z0-9]{2,10}$/i.test(p)) {
+        return path.dirname(p);
+    }
+    return p;
+}
+
+/**
  * Визначає намір користувача та шлях до проєкту.
  */
 export function detectTaskIntent(
@@ -59,7 +80,8 @@ export function detectTaskIntent(
     currentProjectPath?: string | null
 ): TaskContext {
     const lower = idea.toLowerCase();
-    const sourcePath = extractPath(idea);
+    const rawPath = extractPath(idea);
+    const sourcePath = normalizeDirPath(rawPath);
 
     let intent: TaskIntent = 'create';
 
