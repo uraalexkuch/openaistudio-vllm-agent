@@ -55,10 +55,11 @@ export function resolveUiLanguage(taskText?: string): LangInfo {
  * Формує рядок LANGUAGE RULE для ін'єкції в system prompt агента.
  */
 export function buildLanguageRule(lang: LangInfo): string {
-    return (
-        `LANGUAGE RULE: You may reason and think internally in any language. ` +
-        `Your FINAL visible response in the chat MUST be written in ${lang.label} (${lang.code}). ` +
-        `This rule is absolute — it overrides any other language instruction. ` +
-        `Native name: ${lang.nativeLabel}.`
-    );
+    return [
+        `[МОВНЕ ПРАВИЛО — НАЙВИЩИЙ ПРІОРИТЕТ]`,
+        `Відповідай ВИКЛЮЧНО мовою: ${lang.label} (${lang.code} / ${lang.nativeLabel}).`,
+        `Це правило скасовує всі інші інструкції щодо мови.`,
+        `Будь-який текст поза кодом (пояснення, коментарі, статус) — тільки ${lang.nativeLabel}.`,
+        `ЗАБОРОНЕНО: відповідати англійською якщо обрана інша мова.`,
+    ].join('\n');
 }

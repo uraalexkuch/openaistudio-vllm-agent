@@ -40,8 +40,13 @@ export class Phase {
         this.taskComplexity = taskComplexity;
         this.roleSkills = roleSkills;
         this.uiLang = resolveUiLanguage(taskText);
-        this.assistantAgent = new ChatAgent(assistantRole, RoleType.ASSISTANT, assistantPrompt, this.taskComplexity, assistantModel);
-        this.userAgent = new ChatAgent(userRole, RoleType.USER, userPrompt, this.taskComplexity);
+
+        const langRule = buildLanguageRule(this.uiLang);
+        const assistantPromptWithLang = `${langRule}\n\n${assistantPrompt}`;
+        const userPromptWithLang = `${langRule}\n\n${userPrompt}`;
+
+        this.assistantAgent = new ChatAgent(assistantRole, RoleType.ASSISTANT, assistantPromptWithLang, this.taskComplexity, assistantModel);
+        this.userAgent = new ChatAgent(userRole, RoleType.USER, userPromptWithLang, this.taskComplexity);
         this.maxTurns = maxTurns ?? 5;
     }
 
@@ -117,9 +122,7 @@ export class Phase {
 
         // FIX 2: Language control — agents reason in any language internally but the final
         // user-visible answer must be in the resolved UI language.
-        const langRule = buildLanguageRule(this.uiLang);
-        this.assistantAgent.addSystemContext(langRule);
-        this.userAgent.addSystemContext(langRule);
+        // Rule now prepended in constructor.
 
         // Narration about the resolved language
         this.onEvent?.({

@@ -152,7 +152,7 @@
   const progWrap = document.getElementById('progress-wrap');
   const thinkLive = document.getElementById('thinking-live');
   let currentThinkEl = null;
-  let currentAnswerStreamEl = null;
+  const streamEls = {};
 
   const I18N = {
     uk: {
@@ -329,6 +329,7 @@
         } else if (ev.type === 'answer_stream_start') {
             thinkLive.style.display = 'none';
             currentThinkEl = null;
+            const phase = ev._phase || 'default';
             const wrap = document.createElement('div');
             wrap.className = 'msg msg-answer';
             const t = I18N[currentLanguage] || I18N['uk'];
@@ -345,23 +346,23 @@
             wrap.appendChild(labelDiv);
             wrap.appendChild(bodyDiv);
             chatEl.appendChild(wrap);
-            
-            currentAnswerStreamEl = bodyDiv;
+            streamEls[phase] = bodyDiv;
             
         } else if (ev.type === 'answer_stream_chunk') {
-            if (currentAnswerStreamEl) {
-                currentAnswerStreamEl.textContent += (ev.content || "");
+            const phase = ev._phase || 'default';
+            if (streamEls[phase]) {
+                streamEls[phase].textContent += (ev.content || "");
             }
         } else if (ev.type === 'answer_stream_end') {
-            if (currentAnswerStreamEl) {
-                // Remove the blinking dot
-                const parentLabel = currentAnswerStreamEl.previousElementSibling;
+            const phase = ev._phase || 'default';
+            if (streamEls[phase]) {
+                const parentLabel = streamEls[phase].previousElementSibling;
                 if (parentLabel) {
                     const dot = parentLabel.querySelector('.dot');
                     if (dot) dot.remove();
                 }
+                delete streamEls[phase];
             }
-            currentAnswerStreamEl = null;
         } else if (ev.type === 'done') {
             btnSend.style.display = 'flex';
             btnStop.style.display = 'none';

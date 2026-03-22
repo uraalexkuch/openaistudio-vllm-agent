@@ -2,7 +2,7 @@
   "name": "openaistudio-vllm-agent",
   "displayName": "OpenAIStudio vLLM Agent",
   "description": "AI Assistant using local vLLM for software development",
-  "version": "0.0.1",
+  "version": "2.0.0",
   "publisher": "yuriikucherenko",
   "repository": {
     "type": "git",

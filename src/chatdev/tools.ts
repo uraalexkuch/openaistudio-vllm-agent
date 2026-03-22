@@ -81,6 +81,30 @@ export function parseToolCall(responseText: string): ToolCall | null {
         return { name: s4[1].trim(), args: {} };
     }
 
+    // Strategy 5: ```tool_code ... ``` or ```python ... ``` with write_file patterns
+    const pythonBlock = responseText.match(
+        /```(?:tool_code|python)\s*([\s\S]*?)```/i
+    );
+    if (pythonBlock) {
+        const code = pythonBlock[1];
+        // Match open('filename', 'w') and f.write("""content""")
+        const openMatch = code.match(
+            /open\(\s*["']([^"']+)["']\s*,\s*["']w["']/
+        );
+        const contentMatch = code.match(
+            /(?:f\.write|content\s*=)\s*(?:"""|\(""")([\s\S]*?)(?:"""\)|""")/
+        );
+        if (openMatch && contentMatch) {
+            return {
+                name: 'write_file',
+                args: {
+                    filename: openMatch[1],
+                    content: contentMatch[1],
+                }
+            };
+        }
+    }
+
     return null;
 }
 
@@ -245,5 +269,8 @@ export function getToolsDescription(): string {
         "3. NEVER print file content in markdown when filename was specified.",
         "4. One tool call per turn — wait for <tool_result> before the next.",
         "5. After launching, append <DONE> to complete the phase.",
+        "6. CRITICAL: NEVER use Python, bash scripts, or ```tool_code``` blocks.",
+        "7. ONLY use the XML <tool_call> format shown above.",
+        "8. Python os.makedirs(), open(), write() — FORBIDDEN. Use write_file tool instead.",
     ].join("\n");
 }
