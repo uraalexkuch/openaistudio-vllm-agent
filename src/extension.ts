@@ -10,6 +10,7 @@ import { ChatChain } from './chatdev/chat_chain';
 import { Phase } from './chatdev/phase';
 import { WorkspaceManager } from './chatdev/workspace';
 import { VLLMModelBackend } from './camel/model_backend';
+import { invalidateSkillsCache } from './chatdev/skills';
 
 let globalSessionContext = "";
 let isExecuting = false;
@@ -218,8 +219,12 @@ async function syncSkills(context: vscode.ExtensionContext): Promise<void> {
                     : `git -C "${skillsPath}" pull`;
                 return new Promise<void>((innerResolve) => {
                     cp.exec(cmd, (execErr) => {
-                        if (execErr) vscode.window.showErrorMessage(`Помилка синхронізації: ${execErr.message}`);
-                        else vscode.window.showInformationMessage(`✅ Скіли синхронізовано у: ${skillsPath}`);
+                        if (execErr) {
+                            vscode.window.showErrorMessage(`Помилка синхронізації: ${execErr.message}`);
+                        } else {
+                            invalidateSkillsCache();
+                            vscode.window.showInformationMessage(`✅ Скіли синхронізовано у: ${skillsPath}`);
+                        }
                         innerResolve(); resolve();
                     });
                 });

@@ -29,6 +29,11 @@ export function getSkillsPath(): string {
 const _skillsCache: Map<string, { files: string[], ts: number }> = new Map();
 const SKILLS_CACHE_TTL = 30_000;
 
+export function invalidateSkillsCache(): void {
+  _skillsCache.clear();
+  _idfCache = null;
+}
+
 function scanSkillFolders(skillsPath: string): string[] {
   const cached = _skillsCache.get(skillsPath);
   if (cached && (Date.now() - cached.ts) < SKILLS_CACHE_TTL) {
@@ -347,22 +352,21 @@ function buildSkillMeta(filePath: string, skillsPath: string): SkillMeta {
 export async function autoLoadSkillsForTask(
     task: string,
     workspaceContext = '',
-    maxSkills = 2,  // FIX: reduced from 3 to 2 — fewer skills = less noise in prompts
+    maxSkills = 2,
 ): Promise<LoadedSkill[]> {
   const combined = [task, workspaceContext].filter(Boolean).join('\n');
   if (!combined.trim()) return [];
 
-  // FIX: raised primary threshold to 10 (was 7).
-  // Skills like azure-storage, auri-voice were loading for unrelated tasks
-  // because generic tokens like "code", "review", "create" scored 5-7.
-  // At score≥10 only genuinely domain-specific skills load.
-  const allScored = scanAndScoreAllSkillsIdf(combined, new Set(), 10);
+  // Адаптивний поріг залежно від довжини запиту
+  const tokenCount = combined.split(/\s+/).filter(w => w.length > 2).length;
+  const primaryMin  = tokenCount <= 5 ? 5 : tokenCount <= 15 ? 7 : 10;
+  const fallbackMin = Math.max(3, primaryMin - 3);
 
+  const allScored = scanAndScoreAllSkillsIdf(combined, new Set(), primaryMin);
   if (allScored.length === 0) {
-    // Soft fallback at 8 — still high enough to avoid false positives
-    const fallback = scanAndScoreAllSkillsIdf(combined, new Set(), 8);
+    const fallback = scanAndScoreAllSkillsIdf(combined, new Set(), fallbackMin);
     if (fallback.length > 0) {
-      console.log(`[Skills] Using fallback threshold (score≥8): ${fallback.slice(0, maxSkills).map(s => s.name).join(', ')}`);
+      console.log(`[Skills] Using adaptive fallback threshold (${fallbackMin}): ${fallback.slice(0, maxSkills).map(s => s.name).join(', ')}`);
       return loadTopSkills(fallback, maxSkills);
     }
     console.log(`[Skills] No relevant skills found. Proceeding without skills.`);

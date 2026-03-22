@@ -6,7 +6,14 @@ import { getToolsDescription } from "./tools";
 import { resolveUiLanguage, buildLanguageRule, LangInfo } from '../utils/language_utils';
 
 // Phases where the assistant actively needs to write/read/launch files
-const FILE_TOOL_PHASES = new Set(["Coding", "CodeReview", "Documentation", "ArchitectureRevision"]);
+const FILE_TOOL_PHASES = new Set([
+    // старі назви (залишити для сумісності)
+    "Coding", "CodeReview", "Documentation", "ArchitectureRevision",
+    // нові назви з пайплайнів
+    "Implementation", "Frontend Implementation", "Backend Implementation",
+    "Code Review", "Project Documentation",
+    // динамічний DAG може генерувати довільні назви — ловимо за підрядком нижче
+]);
 
 export class Phase {
     public phaseName: string;
@@ -91,7 +98,14 @@ export class Phase {
         // Inject tool schema ONLY for the assistant agent (the one doing the work).
         // userAgent (CTO, CPO reviewing) must NOT get tool descriptions —
         // they were responding AS IF executing tools which breaks the flow entirely.
-        if (FILE_TOOL_PHASES.has(this.phaseName)) {
+        // FIX 1: Provide tool descriptions for phases that require file manipulation
+        const needsTools = FILE_TOOL_PHASES.has(this.phaseName) ||
+            this.phaseName.toLowerCase().includes("implement") ||
+            this.phaseName.toLowerCase().includes("coding") ||
+            this.phaseName.toLowerCase().includes("review") ||
+            this.phaseName.toLowerCase().includes("document");
+
+        if (needsTools) {
             this.assistantAgent.addSystemContext(getToolsDescription());
             // userAgent gets a brief reminder NOT to execute tools
             this.userAgent.addSystemContext(

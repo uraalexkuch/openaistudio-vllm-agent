@@ -106,8 +106,11 @@
   <div id="header">
     <span id="header-title">OPENAISTUDIO</span>
     <select id="lang-select">
-      <option value="Ukrainian">UK</option>
-      <option value="English">EN</option>
+      <option value="uk">🇺🇦 Українська</option>
+      <option value="en">🇬🇧 English</option>
+      <option value="de">🇩🇪 Deutsch</option>
+      <option value="fr">🇫🇷 Français</option>
+      <option value="pl">🇵🇱 Polski</option>
     </select>
     <select id="model-select"></select>
     <button id="btn-clear">Очистити</button>
@@ -149,6 +152,7 @@
   const progWrap = document.getElementById('progress-wrap');
   const thinkLive = document.getElementById('thinking-live');
   let currentThinkEl = null;
+  let currentAnswerStreamEl = null;
 
   function send() {
     const text = inputEl.value.trim();
@@ -169,6 +173,9 @@
     const data = e.data;
     if (data.type === 'models_list') {
         modelSelect.innerHTML = data.models.map(m => `<option value="${m}" ${m===data.current ? 'selected':''}>${m}</option>`).join('');
+        if (data.currentLang) {
+            langSelect.value = data.currentLang;
+        }
     } else if (data.type === 'task_start') {
         emptyEl.style.display = 'none';
         btnSend.style.display = 'none';

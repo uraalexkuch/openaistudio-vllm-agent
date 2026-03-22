@@ -52,7 +52,7 @@ export class VLLMModelBackend {
         const modelGeneral   = config.get<string>("modelGeneral",   "gemma").trim();
 
         const roleLower = roleName.toLowerCase();
-        const isComplex = taskComplexity === "High";
+        const isComplex = taskComplexity === "High" || taskComplexity === "Medium";
 
         let chosenPath: string;
 

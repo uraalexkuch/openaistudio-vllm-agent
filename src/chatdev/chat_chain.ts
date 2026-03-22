@@ -6,6 +6,7 @@ import { Memory } from "./memory";
 import { VLLMModelBackend } from "../camel/model_backend";
 import * as path from "path";
 import * as fs from "fs";
+import { resolveUiLanguage, buildLanguageRule } from '../utils/language_utils';
 
 export interface PhaseDef {
     phase: Phase;
@@ -27,10 +28,12 @@ export class ChatChain {
         if (rawResult.length < 400) return rawResult;
         try {
             const summariser = new VLLMModelBackend("Chief Product Officer");
+            const langRule = buildLanguageRule(resolveUiLanguage());
             const prompt = [
                 `You are a technical summariser. Summarise the "${phaseName}" phase output below.`,
                 `Max 200 words. Cover: key decisions, files created/modified (exact names), TODOs, what next phase needs.`,
                 `Output ONLY the summary — no preamble, no markdown fences.`,
+                langRule,
                 ``,
                 `=== PHASE OUTPUT ===`,
                 rawResult.slice(0, 6000),

@@ -22,6 +22,10 @@ export class ChatWebview {
             switch (msg.type) {
                 case 'run_task':
                     if (msg.text) {
+                        if (msg.lang) {
+                            const cfg = vscode.workspace.getConfiguration('openaistudio');
+                            await cfg.update('uiLanguage', msg.lang, vscode.ConfigurationTarget.Global);
+                        }
                         vscode.commands.executeCommand('openaistudio.startTaskFromWebview', msg.text);
                     }
                     break;
@@ -93,10 +97,14 @@ export class ChatWebview {
     public broadcastModels() {
         const config  = vscode.workspace.getConfiguration('openaistudio');
         const current = config.get<string>('modelGeneral', 'gemma');
+        const currentLang = config.get<string>('uiLanguage', '') || 
+            vscode.env.language.split('-')[0].toLowerCase();
+
         this._panel.webview.postMessage({
             type: 'models_list',
             models: [current, 'qwen3-coder', 'codestral', 'gemma'],
-            current
+            current,
+            currentLang
         });
     }
 
