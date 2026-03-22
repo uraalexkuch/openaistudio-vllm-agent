@@ -909,7 +909,12 @@ CRITICAL DAG RULES for documentation:
 3. CORRECT: {"name":"API Docs","role":"Technical Writer","dependsOn":["Project Analysis"]}
 4. WRONG:   {"name":"API Docs","role":"Technical Writer","dependsOn":["Project Analysis","Cyber Security Specialist"]}
 5. Keep it simple: ONE Project Analyst phase (Project Analysis), then Technical Writer phases in parallel
-6. Maximum 4-5 documentation sections to avoid parallel overload
+6. Maximum 3 documentation sections (not 4+) to avoid context overload.
+CORRECT minimal plan:
+{"name":"Project Analysis","role":"Project Analyst","dependsOn":[]}
+{"name":"README & Architecture","role":"Technical Writer","dependsOn":["Project Analysis"]}
+{"name":"API Documentation","role":"Technical Writer","dependsOn":["Project Analysis"]}
+{"name":"Setup & User Guide","role":"Technical Writer","dependsOn":["Project Analysis"]}
 ` : 'Build an analysis DAG. First phase MUST be "Project Analysis" (Project Analyst role) to read the code.';
     
     return [

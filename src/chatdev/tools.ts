@@ -25,7 +25,37 @@ function tryParseArgs(raw: string): any {
     if (!s) return {};
     // Strip inner <args>...</args> wrapper if present
     const inner = s.replace(/^<args>([\s\S]*?)<\/args>$/i, '$1').trim();
-    try { return JSON.parse(inner || '{}'); } catch { return { query: inner }; }
+    
+    try { 
+        return JSON.parse(inner || '{}'); 
+    } catch {
+        // Manual extraction for write_file even if JSON is malformed (e.g. large content on one line)
+        const fnMatch = inner.match(/"filename"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+        if (fnMatch) {
+            const contentStart = inner.indexOf('"content"');
+            if (contentStart !== -1) {
+                const afterKey = inner.substring(contentStart + 10); // after "content":
+                const valueStart = afterKey.indexOf('"');
+                if (valueStart !== -1) {
+                    // Extract until the very last " before the ending } or EOF
+                    const valueContent = afterKey.substring(valueStart + 1);
+                    const content = valueContent
+                        .replace(/\\n/g, '\n')
+                        .replace(/\\t/g, '\t')
+                        .replace(/\\"/g, '"')
+                        .replace(/\\r/g, '')
+                        .replace(/\\\\/g, '\\')
+                        .replace(/"[\s\S]*$/, ''); // remove tail after the closing "
+                    return {
+                        filename: fnMatch[1].replace(/\\\\/g, '\\'),
+                        content,
+                    };
+                }
+            }
+            return { filename: fnMatch[1].replace(/\\\\/g, '\\'), content: '' };
+        }
+        return { query: inner };
+    }
 }
 
 /**
@@ -162,7 +192,20 @@ export async function executeTool(toolCall: ToolCall): Promise<string> {
 
         case "write_file": {
             try {
-                const filename = String(toolCall.args.filename ?? '').trim();
+                let filename = String(toolCall.args.filename ?? '').trim();
+                let content  = toolCall.args.content ?? '';
+
+                // Fallback: recovery if args were wrapped in {query: "...JSON..."}
+                if (!filename && toolCall.args.query) {
+                    try {
+                        const recovered = JSON.parse(toolCall.args.query);
+                        filename = String(recovered.filename ?? '').trim();
+                        content  = recovered.content ?? '';
+                    } catch {
+                        // ignore and fall through to missing filename error
+                    }
+                }
+
                 if (!filename) return 'write_file error: "filename" argument is required.';
 
                 const filePath = resolveToolPath(filename);
@@ -170,7 +213,6 @@ export async function executeTool(toolCall: ToolCall): Promise<string> {
                 // FIX: create all parent directories, not just workspace root
                 fs.mkdirSync(path.dirname(filePath), { recursive: true });
 
-                const content = toolCall.args.content ?? '';
                 fs.writeFileSync(filePath, content, 'utf8');
 
                 const sizeKb = (Buffer.byteLength(content, 'utf8') / 1024).toFixed(1);

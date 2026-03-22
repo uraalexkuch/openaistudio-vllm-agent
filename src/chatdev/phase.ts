@@ -220,6 +220,11 @@ export class Phase {
                            `Ensure it fulfills the task: "${originalTask}". ` +
                            `Provide feedback or output <DONE> if complete.`;
         } else if (isAnalystPhase) {
+            // Extract project path from the analysisContext block in taskPrompt
+            const pathMatch = taskPrompt.match(/Path:\s*([^\s\n]+)/);
+            const projectPath = pathMatch ? pathMatch[1].trim() : '';
+            const escapedPath = projectPath.replace(/\\/g, '\\\\');
+
             promptForAssistant = [
                 `=== ORIGINAL USER TASK ===`,
                 originalTask,
@@ -227,6 +232,12 @@ export class Phase {
                 ``,
                 `=== YOUR ROLE: ${this.assistantAgent.getRoleName()} (${this.phaseName}) ===`,
                 `Explore and understand the existing project thoroughly.`,
+                ``,
+                `MANDATORY FIRST ACTION — call this tool IMMEDIATELY, no text before it:`,
+                `<tool_call><n>list_files</n><args>{"directory": "${escapedPath || '.'}"}</args></tool_call>`,
+                ``,
+                `Do NOT write any text before calling list_files.`,
+                `Do NOT explain what you will do. Just call the tool.`,
                 `Use ONLY list_files and read_file tools.`,
                 `FORBIDDEN: write_file, make_directory, launch_file, execute_bash.`,
                 taskIdx !== -1 
@@ -256,21 +267,32 @@ export class Phase {
             promptForUser = `I have completed the implementation for the task: "${originalTask}". ` +
                            `Please review the files at their saved locations and provide feedback.`;
         } else if (isDocPhase) {
+            // Extract file paths from context to help the writer focus
+            const filePathsInContext = [...taskPrompt.matchAll(/[A-Za-z]:[\\\/][^\s\n,]+\.\w+/g)]
+                .map(m => m[0])
+                .slice(0, 5)
+                .join(', ');
+
             promptForAssistant = [
                 `=== ORIGINAL USER TASK ===`,
                 originalTask,
                 `=== END OF TASK ===`,
                 ``,
                 `=== YOUR ROLE: ${this.assistantAgent.getRoleName()} (${this.phaseName}) ===`,
-                `Your task is to document the project. Do NOT write game code. ` +
+                `Write documentation based on the project analysis in CONTEXT below.`,
+                ``,
+                filePathsInContext 
+                    ? `Key files already found in analysis: ${filePathsInContext}\nRead them with read_file if you need more details.`
+                    : `Start with: list_files to understand the project structure.`,
+                ``,
+                `Save your documentation to: write_file with filename in PROJECT PATH (not workspace/).`,
+                `FORBIDDEN: Reading the same files that are already fully summarized in CONTEXT.`,
                 `FORBIDDEN: You must NEVER call launch_file or execute_bash. Only use write_file for documentation.`,
-                `Create a README.md based on the features and files described in the context.`,
-                `IMPORTANT: If the project was saved to an absolute path, reflect this in the documentation.`,
-                taskIdx !== -1 ? `\n=== CONTEXT & SUMMARIES ===\n${taskPrompt.substring(0, taskIdx).trim()}` : '',
+                taskIdx !== -1 ? `\n=== CONTEXT (project analysis results) ===\n${taskPrompt.substring(0, taskIdx).trim()}` : '',
             ].filter(Boolean).join('\n');
             
             promptForUser = `The project based on task "${originalTask}" is complete. ` +
-                           `Please write the technical documentation (README.md).`;
+                           `Please review the technical documentation (README.md) based on the analysis context.`;
         }
 
         // Logical Flow: User Agent (CTO/Manager) starts the conversation or prompts the assistant.
