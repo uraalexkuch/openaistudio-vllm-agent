@@ -11,10 +11,13 @@ const CHARS_PER_TOKEN = 3;
 
 // Extra token buffer to absorb tokeniser rounding and special tokens
 // (BOS, EOS, role headers, etc. added by vLLM's chat template).
-const TOKENIZER_OVERHEAD = 256;
+const TOKENIZER_OVERHEAD = 512;
 
 // Maximum fraction of the context window dedicated to output.
-const MAX_OUTPUT_FRACTION = 0.65;
+const MAX_OUTPUT_FRACTION = 0.60;
+
+// Safety margin when calculating requested output tokens
+const OUTPUT_SAFETY_MARGIN = 128;
 
 export class VLLMModelBackend {
     private openai: OpenAI;
@@ -203,12 +206,22 @@ export class VLLMModelBackend {
 
             // 6. Compute output budget from actual (post-truncation) input estimate.
             const estimatedInputTokens = this.estimateTokens(totalChars);
-            const availableForOutput   = this.maxTokens - estimatedInputTokens;
+            const availableForOutput   = this.maxTokens - estimatedInputTokens - OUTPUT_SAFETY_MARGIN;
             const maxOutputByFraction  = Math.floor(this.maxTokens * MAX_OUTPUT_FRACTION);
             requestedOutputTokens = Math.max(
                 256,
                 Math.min(maxOutputByFraction, availableForOutput)
             );
+
+            // Final safety check: ensure input + output doesn't exceed context limit
+            if (estimatedInputTokens + requestedOutputTokens > this.maxTokens) {
+                requestedOutputTokens = this.maxTokens - estimatedInputTokens - OUTPUT_SAFETY_MARGIN;
+                console.warn(
+                    `VLLMModelBackend [${this.model}]: Adjusted output tokens to ${requestedOutputTokens} ` +
+                    `to fit within context limit of ${this.maxTokens}`
+                );
+            }
+            requestedOutputTokens = Math.max(256, requestedOutputTokens);
 
             console.log(
                 `VLLMModelBackend [${this.model}]: chars=${totalChars} ` +
