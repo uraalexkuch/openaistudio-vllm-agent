@@ -272,6 +272,7 @@ function loadRoleConfig(extensionPath: string): RoleConfig {
     // Priority: Project root RoleConfig.json, then src/config/RoleConfig.json
     const paths = [
         path.join(extensionPath, 'RoleConfig.json'),
+        path.join(extensionPath, 'dist', 'RoleConfig.json'),
         path.join(extensionPath, 'src', 'config', 'RoleConfig.json')
     ];
 
@@ -598,11 +599,7 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
                 if (allSummaries) {
                     globalSessionContext += `[Результат "${idea}"]:\n${allSummaries}\n---\n`;
                 }
-                globalSessionContext = trimSessionContext(globalSessionContext, 3000);
             }
-
-        // Cap total session context to prevent prompt overflow
-        globalSessionContext = trimSessionContext(globalSessionContext, 3000);
 
         // Якщо стек був зафіксований вручну — запропонувати скинути
         const forcedStack = config.get<string>('forceStack', '');

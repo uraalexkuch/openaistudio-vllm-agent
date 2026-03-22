@@ -10,8 +10,21 @@ export async function delegate_to_expert(expert_role: string, task_description: 
     const langRule = buildLanguageRule(lang);
 
     // Отримуємо релевантні навички (skills) для субагента (через парсинг SKILL.md)
-    const loadedSkills = await autoLoadSkillsForTask(`${expert_role} ${task_description}`);
-    const skillsText = loadedSkills.length > 0 ? `\n\n=== АКТУАЛЬНІ НАВИЧКИ (SKILLS) ===\n${loadedSkills.map((s: any) => `[${s.name}]:\n${s.content}`).join('\n\n')}\n==================================\n` : '';
+    const isReviewRole = expert_role.toLowerCase().includes('review') || 
+                         expert_role.toLowerCase().includes('analyst');
+    
+    const loadedSkills = await autoLoadSkillsForTask(
+        `${expert_role} ${task_description}`, '', 2, isReviewRole
+    );
+
+    const MAX_SKILL_CHARS = 1500;
+    const skillsText = loadedSkills.length > 0 
+        ? `\n\n=== SKILLS ===\n${loadedSkills.map((s: any) => {
+            const c = s.content.length > MAX_SKILL_CHARS 
+                ? s.content.substring(0, MAX_SKILL_CHARS) + '\n…' : s.content;
+            return `[${s.name}]:\n${c}`;
+          }).join('\n\n')}\n===\n` 
+        : '';
 
     // Create a temporary subagent to solve the task
     const subAgent = new ChatAgent(
