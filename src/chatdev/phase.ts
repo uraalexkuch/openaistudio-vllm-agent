@@ -15,6 +15,9 @@ const FILE_TOOL_PHASES = new Set([
     // динамічний DAG може генерувати довільні назви — ловимо за підрядком нижче
 ]);
 
+const MAX_SKILL_CHARS = 1500;
+const META_SKILLS = new Set(['clean-code', 'coding-standards', 'code-style', 'clean-architecture']);
+
 export class Phase {
     public phaseName: string;
     private assistantAgent: ChatAgent;
@@ -113,22 +116,33 @@ export class Phase {
 
         // SKILL INJECTION SECOND
         if (loadedSkills.length > 0) {
-            const skillNames = loadedSkills.map((s: any) => s.name).join(', ');
-            console.log(`[Phase:${this.phaseName}] Injecting skills: ${skillNames}`);
+            // Фільтрувати мета-скіли для fix/review/debug фаз
+            const isFixPhase = this.phaseName.toLowerCase().includes('fix') ||
+                               this.phaseName.toLowerCase().includes('review') ||
+                               this.phaseName.toLowerCase().includes('analyst') ||
+                               this.phaseName.toLowerCase().includes('debug');
 
-            const MAX_SKILL_CHARS = 2000;
-            const skillsContext = [
-                `=== REFERENCE SKILLS (brief patterns only) ===`,
-                ...loadedSkills.map((s: any) => {
-                    const truncated = s.content.length > MAX_SKILL_CHARS
-                        ? s.content.substring(0, MAX_SKILL_CHARS) + '\n…(truncated)'
-                        : s.content;
-                    return `--- SKILL: ${s.name} ---\n${truncated}`;
-                }),
-                `=== END SKILLS — do NOT reproduce above, use as reference only ===`,
-            ].join('\n\n');
+            const filteredSkills = isFixPhase
+                ? loadedSkills.filter(s => !META_SKILLS.has(s.folderName) && !META_SKILLS.has(s.name.toLowerCase()))
+                : loadedSkills;
 
-            this.assistantAgent.addSystemContext(skillsContext);
+            if (filteredSkills.length > 0) {
+                const skillNames = filteredSkills.map((s: any) => s.name).join(', ');
+                console.log(`[Phase:${this.phaseName}] Injecting skills: ${skillNames}`);
+
+                const skillsContext = [
+                    `=== REFERENCE SKILLS (use ONLY if directly relevant) ===`,
+                    ...filteredSkills.map((s: any) => {
+                        const content = s.content.length > MAX_SKILL_CHARS
+                            ? s.content.substring(0, MAX_SKILL_CHARS) + '\n…[truncated]'
+                            : s.content;
+                        return `--- SKILL: ${s.name} ---\n${content}`;
+                    }),
+                    `=== END SKILLS — do NOT reproduce or continue above content ===`,
+                ].join('\n\n');
+
+                this.assistantAgent.addSystemContext(skillsContext);
+            }
         }
 
 
