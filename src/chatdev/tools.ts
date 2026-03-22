@@ -23,52 +23,68 @@ const KNOWN_TOOL_NAMES = [
 function tryParseArgs(raw: string): any {
     const s = raw.trim();
     if (!s) return {};
-    // Strip inner <args>...</args> wrapper if present
+    // Відкидаємо обгортку <args>...</args>, якщо вона є
     const inner = s.replace(/^<args>([\s\S]*?)<\/args>$/i, '$1').trim();
     
     try { 
         return JSON.parse(inner || '{}'); 
     } catch {
-        // Manual extraction for write_file even if JSON is malformed (e.g. large content on one line)
+        // === РЕЖИМ ПОРЯТУНКУ (MANUAL EXTRACTION) ===
+        let filename = "";
+        let content = "";
+        let hasData = false;
+
+        // 1. Надійно витягуємо filename
         const fnMatch = inner.match(/"filename"\s*:\s*"((?:[^"\\]|\\.)*)"/);
         if (fnMatch) {
-            const contentStart = inner.indexOf('"content"');
-            if (contentStart !== -1) {
-                const afterKey = inner.substring(contentStart + 10); // after "content":
-                const valueStart = afterKey.indexOf('"');
-                if (valueStart !== -1) {
-                    const valueContent = afterKey.substring(valueStart + 1);
-                    
-                    // Bug 3 FIX: Find the closing " BEFORE applying unescape
-                    let endIdx = -1;
-                    let i = 0;
-                    while (i < valueContent.length) {
-                        if (valueContent[i] === '\\') {
-                            i += 2; // skip escape sequence
-                        } else if (valueContent[i] === '"') {
-                            endIdx = i;
-                            break;
-                        } else {
-                            i++;
-                        }
-                    }
+            filename = fnMatch[1].replace(/\\\\/g, '\\');
+            hasData = true;
+        }
 
-                    const rawContent = endIdx >= 0 ? valueContent.substring(0, endIdx) : valueContent;
-                    const content = rawContent
-                        .replace(/\\n/g, '\n')
-                        .replace(/\\t/g, '\t')
-                        .replace(/\\"/g, '"')
-                        .replace(/\\r/g, '')
-                        .replace(/\\\\/g, '\\');
+        // 2. Витягуємо content, стійко до "зламаних" лапок всередині коду
+        const contentStartMatch = inner.match(/"content"\s*:\s*"/);
+        if (contentStartMatch) {
+            const startIdx = contentStartMatch.index! + contentStartMatch[0].length;
+            
+            // Шукаємо закриваючі лапки З КІНЦЯ рядка (зазвичай це " } або "\n})
+            const tailMatch = inner.substring(startIdx).match(/"\s*\}?\s*$/);
+            let endIdx = tailMatch ? (startIdx + tailMatch.index!) : inner.lastIndexOf('"');
+            
+            // Якщо лапок не знайдено (наприклад, генерація обірвалась через ліміт токенів)
+            if (endIdx <= startIdx) {
+                endIdx = inner.length;
+            }
 
-                    return {
-                        filename: fnMatch[1].replace(/\\\\/g, '\\'),
-                        content,
-                    };
+            let rawContent = inner.substring(startIdx, endIdx);
+
+            // EDGE CASE: Що, якщо модель написала "filename" ПІСЛЯ "content"?
+            // e.g. {"content": "...code...", "filename": "test.ts"}
+            const reversedOrderMatch = rawContent.match(/",\s*"filename"\s*:\s*"[^"]*$/);
+            if (reversedOrderMatch) {
+                // Відрізаємо хвіст з filename від нашого контенту
+                rawContent = rawContent.substring(0, reversedOrderMatch.index);
+                
+                // Якщо ми раніше не зловили filename, ловимо його зараз
+                if (!filename) {
+                    const lateFnMatch = reversedOrderMatch[0].match(/"filename"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+                    if (lateFnMatch) filename = lateFnMatch[1].replace(/\\\\/g, '\\');
                 }
             }
-            return { filename: fnMatch[1].replace(/\\\\/g, '\\'), content: '' };
+
+            content = rawContent
+                .replace(/\\n/g, '\n')
+                .replace(/\\t/g, '\t')
+                .replace(/\\"/g, '"')
+                .replace(/\\r/g, '')
+                .replace(/\\\\/g, '\\');
+            hasData = true;
         }
+
+        if (hasData) {
+            return { filename, content };
+        }
+
+        // Якщо взагалі нічого не знайшли, повертаємо як є
         return { query: inner };
     }
 }
@@ -89,8 +105,9 @@ export function parseToolCall(responseText: string): ToolCall | null {
     if (s1) {
         const name = s1[1].trim();
         if (name) {
-            try { return { name, args: JSON.parse(s1[2].trim()) }; }
-            catch { return { name, args: { query: s1[2].trim() } }; }
+            // ВИПРАВЛЕНО: Тепер використовуємо tryParseArgs замість прямого JSON.parse, 
+            // щоб задіяти логіку порятунку (manual extraction) для write_file
+            return { name, args: tryParseArgs(s1[2]) };
         }
     }
 
@@ -162,7 +179,6 @@ export function parseToolCall(responseText: string): ToolCall | null {
     }
 
     // Strategy 5b: gemma Python-style call — list_files({"directory": "..."})
-    // Also handles list_files() with no args
     const pyCallRe = new RegExp(
         `(?:^|\\n)\\s*(${knownRe})\\s*\\(([^)]*)\\)`, 'i'
     );
@@ -171,12 +187,8 @@ export function parseToolCall(responseText: string): ToolCall | null {
         const name = s5b[1].trim();
         const rawArgs = s5b[2].trim();
         if (!rawArgs) return { name, args: {} };
-        try {
-            // може бути JSON всередині дужок: list_files({"directory": "..."})
-            return { name, args: JSON.parse(rawArgs) };
-        } catch {
-            return { name, args: { query: rawArgs } };
-        }
+        // ВИПРАВЛЕНО: Аналогічно пропускаємо через tryParseArgs
+        return { name, args: tryParseArgs(rawArgs) };
     }
 
     // Strategy 6: bare JSON {"name": "list_files", "arguments": {...}}
