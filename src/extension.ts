@@ -339,6 +339,16 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
     const workspaceRoot = getWorkspaceRoot();
 
     let fullExecutionPrompt = taskCtx.description;
+
+    // ── Logic Improvement: Inject active file for fix/refactor ────────────────
+    if ((taskCtx.intent === 'fix' || taskCtx.intent === 'refactor') && taskCtx.useCurrentProject) {
+        const activeFile = wsManager.getActiveFileContent();
+        const activeContext = wsManager.gatherContext();
+        if (activeFile && !fullExecutionPrompt.includes(activeFile.substring(0, 100))) {
+            fullExecutionPrompt += `\n\n=== ACTIVE FILE ===\n${activeContext}\n${activeFile}`;
+        }
+    }
+
     if (globalSessionContext) {
         fullExecutionPrompt = `Історія попередніх сесій:\n${globalSessionContext}\nНове завдання: ${taskCtx.description}`;
         ChatWebview.currentPanel?.broadcastEvent({ type: 'narration', content: `🔄 Продовження роботи над проектом` });
@@ -363,7 +373,7 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
                 type: 'narration',
                 content: `🔍 Режим: ${intentLabel(taskCtx.intent)} існуючого проєкту`
                        + `\n📂 Шлях: ${taskCtx.sourcePath}`
-            });
+             });
         } else {
             ChatWebview.currentPanel?.broadcastEvent({
                 type: 'narration',
@@ -371,7 +381,8 @@ async function executeProject(idea: string, context: vscode.ExtensionContext) {
             });
         }
 
-        const analysisContext = buildAnalysisContext(taskCtx, targetPath, currentProject);
+        const hasInlineCode = fullExecutionPrompt.includes('```');
+        const analysisContext = buildAnalysisContext(taskCtx, targetPath, currentProject, hasInlineCode);
         fullExecutionPrompt = `${analysisContext}\n\n${fullExecutionPrompt}`;
 
     // ── РЕЖИМ: Створення нового ──────────────────────────────────────────────
@@ -801,7 +812,8 @@ function intentLabel(intent: TaskIntent): string {
 function buildAnalysisContext(
     taskCtx:        ReturnType<typeof detectTaskIntent>,
     targetPath:     string | null,
-    currentProject: ReturnType<WorkspaceManager['gatherProjectContext']>
+    currentProject: ReturnType<WorkspaceManager['gatherProjectContext']>,
+    hasInlineCode:  boolean
 ): string {
 
     if (!targetPath) {
@@ -823,23 +835,27 @@ function buildAnalysisContext(
     // Windows paths escaping
     const escapedSp = targetPath.replace(/\\/g, '\\\\');
 
+    const isReadOnly = taskCtx.intent === 'explain';
+    const permissions = isReadOnly
+        ? `FORBIDDEN: write_file, make_directory, launch_file. READ ONLY.`
+        : `ALLOWED: read_file, list_files, write_file (to fix issues).
+FORBIDDEN: make_directory, launch_file unless explicitly requested.`;
+
+    const workflow = hasInlineCode
+        ? `Code is provided inline above. Analyze it directly.`
+        : `1. Start with: list_files → {"directory": "${escapedSp}"}\n2. Read key files: read_file → {"filename": "${escapedSp}/package.json"}`;
+
     return [
-        `═══ EXISTING PROJECT ANALYSIS ═══`,
-        `Intent:  ${taskCtx.intent}`,
+        `═══ EXISTING PROJECT: ${taskCtx.intent.toUpperCase()} ═══`,
         `Path:    ${targetPath}`,
         isCurrentProject ? `Source:  currently open in VS Code` : '',
         projectInfo,
         ``,
-        `MANDATORY WORKFLOW:`,
-        `1. Start with: list_files → {"directory": "${escapedSp}"}`,
-        `2. Read key files: read_file → {"filename": "${escapedSp}/package.json"}`,
-        `   (or Cargo.toml, requirements.txt, go.mod etc.)`,
-        `3. Read main entry file based on detected stack`,
-        `4. Read src/ or app/ directory structure`,
-        `5. Then analyze and explain/fix/refactor as requested`,
+        `WORKFLOW:`,
+        workflow,
+        `3. ${taskCtx.intent === 'fix' ? 'Fix issues and write_file' : 'Analyze and explain'}`,
         ``,
-        `FORBIDDEN: creating new files, running write_file,`,
-        `changing the project unless explicitly asked to fix/refactor.`,
+        permissions,
         `DO NOT create workspace/ structure for this task.`,
         `═══════════════════════════════════`,
     ].filter(Boolean).join('\n');
