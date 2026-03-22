@@ -100,18 +100,23 @@ export class Phase {
             );
         }
 
-        // TOOL INJECTION FIRST (FIX: model focus)
-        const needsTools = FILE_TOOL_PHASES.has(this.phaseName) ||
-            this.phaseName.toLowerCase().includes("implement") ||
-            this.phaseName.toLowerCase().includes("coding") ||
-            this.phaseName.toLowerCase().includes("review") ||
-            this.phaseName.toLowerCase().includes("document");
-
         const isAnalystPhase = 
             this.phaseName.toLowerCase().includes('analys') ||
             this.assistantAgent.getRoleName().toLowerCase().includes('analyst') ||
             this.phaseName.toLowerCase().includes('exploration') ||
             this.phaseName.toLowerCase().includes('explore');
+
+        const isDocPhase = 
+            this.assistantAgent.getRoleName().toLowerCase().includes('writer') ||
+            this.phaseName.toLowerCase().includes('document') ||
+            this.phaseName.toLowerCase().includes('guide');
+
+        // TOOL INJECTION FIRST (FIX: model focus)
+        const needsTools = isAnalystPhase || isDocPhase ||
+            FILE_TOOL_PHASES.has(this.phaseName) ||
+            this.phaseName.toLowerCase().includes("implement") ||
+            this.phaseName.toLowerCase().includes("coding") ||
+            this.phaseName.toLowerCase().includes("review");
 
         if (needsTools) {
             this.assistantAgent.addSystemContext(getToolsDescription());
@@ -201,7 +206,6 @@ export class Phase {
         let promptForUser      = "";
 
         const isReviewPhase  = this.phaseName.toLowerCase().includes("review");
-        const isDocPhase     = this.phaseName.toLowerCase().includes("documentation");
         const isWorkerPhase  = !isReviewPhase && !isDocPhase && !isAnalystPhase;
 
         if (isWorkerPhase) {
@@ -245,12 +249,7 @@ export class Phase {
                     : '',
             ].filter(Boolean).join('\n');
 
-            promptForUser = 
-                `You are reviewing a technical project analysis. ` +
-                `ONLY check: did the analyst call list_files and read_file tools? ` +
-                `If yes and the project structure is described → output <DONE>. ` +
-                `If no tools were called → say "Please call list_files first". ` +
-                `Do NOT provide business advice. Do NOT call tools yourself.`;
+            promptForUser = `Start the analysis now.`;
         } else if (isReviewPhase) {
             promptForAssistant = [
                 `=== ORIGINAL USER TASK ===`,
@@ -273,6 +272,30 @@ export class Phase {
                 .slice(0, 5)
                 .join(', ');
 
+            // Extract target path for naming the file
+            const pathMatch = taskPrompt.match(/Path:\s*([^\s\n]+)/);
+            const targetPath = pathMatch ? pathMatch[1].trim() : '';
+            const escapedTargetPath = targetPath.replace(/\\/g, '\\\\');
+
+            // Determine target file name based on phase name
+            const docTargetFile = (() => {
+                const lower = this.phaseName.toLowerCase();
+                const base = escapedTargetPath || '.';
+                if (lower.includes('readme') || lower.includes('architecture'))
+                    return `${base}\\\\README.md`;
+                if (lower.includes('api'))
+                    return `${base}\\\\docs\\\\API.md`;
+                if (lower.includes('database') || lower.includes('schema'))
+                    return `${base}\\\\docs\\\\DATABASE.md`;
+                if (lower.includes('user guide') || lower.includes('setup') || lower.includes('guide'))
+                    return `${base}\\\\docs\\\\SETUP.md`;
+                if (lower.includes('security'))
+                    return `${base}\\\\docs\\\\SECURITY.md`;
+                // generic fallback
+                const slug = this.phaseName.replace(/\s+/g, '_').toUpperCase();
+                return `${base}\\\\docs\\\\${slug}.md`;
+            })();
+
             promptForAssistant = [
                 `=== ORIGINAL USER TASK ===`,
                 originalTask,
@@ -285,14 +308,17 @@ export class Phase {
                     ? `Key files already found in analysis: ${filePathsInContext}\nRead them with read_file if you need more details.`
                     : `Start with: list_files to understand the project structure.`,
                 ``,
-                `Save your documentation to: write_file with filename in PROJECT PATH (not workspace/).`,
+                `MANDATORY: Save your output to EXACTLY this file:`,
+                `write_file → {"filename": "${docTargetFile}", "content": "..."}`,
+                `Do NOT write to README.md unless it is your assigned file.`,
+                ``,
                 `FORBIDDEN: Reading the same files that are already fully summarized in CONTEXT.`,
                 `FORBIDDEN: You must NEVER call launch_file or execute_bash. Only use write_file for documentation.`,
                 taskIdx !== -1 ? `\n=== CONTEXT (project analysis results) ===\n${taskPrompt.substring(0, taskIdx).trim()}` : '',
             ].filter(Boolean).join('\n');
             
             promptForUser = `The project based on task "${originalTask}" is complete. ` +
-                           `Please review the technical documentation (README.md) based on the analysis context.`;
+                           `Please review the technical documentation based on the analysis context.`;
         }
 
         // Logical Flow: User Agent (CTO/Manager) starts the conversation or prompts the assistant.

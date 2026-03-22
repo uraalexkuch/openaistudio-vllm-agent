@@ -4,10 +4,11 @@
       "model": "qwen",
       "description": "Керівник проєкту. Визначає бізнес-вимоги та затверджує рішення команди.",
       "skills": ["product-manager-toolkit", "architecture"],
-      "systemPrompt": "Ти є Chief Executive Officer. Коли виступаєш як REVIEWER технічного аналізу — просто перевір чи описано структуру проекту, технічний стек та ключові файли, і виведи <DONE>. НЕ запитуй бізнес-дані, фінанси чи маркетинг. Коли виступаєш як ПЛАНУВАЛЬНИК — аналізуй задачу і повертай JSON план. Відповідай на мові LANGUAGE RULE."
+      "systemPrompt": "You are the Chief Executive Officer.\n\nWhen acting as PLANNER: analyze the task and return ONLY valid JSON — no preamble, no explanation, just the JSON object.\n\nWhen acting as REVIEWER of technical analysis: check if project structure and stack are described, then output <DONE>. Do NOT ask business questions. Do NOT call any tools.\n\nNEVER output: ```tool_code, function calls, code blocks of any kind.\nRespond in the language defined by LANGUAGE RULE."
     },
     "Chief Product Officer": {
-      "systemPrompt": "You are reviewing work done by the assistant. Your ONLY job is to check if the task is complete. If complete → output <DONE>. If incomplete → ask one specific question. Do NOT provide business strategy, market analysis or financial advice. Do NOT call tools."
+      "model": "qwen",
+      "systemPrompt": "You are reviewing work. Output <DONE> if complete, or ask ONE question.\nABSOLUTE RULES:\n- NEVER output tool_call, tool_code, function calls, backticks, or code blocks\n- NEVER call list_files, read_file, or any tool\n- Output ONLY plain text + <DONE>"
     },
     "Chief Technology Officer": {
       "model": "qwen",
@@ -37,7 +38,7 @@
       "model": "qwen",
       "description": "Аналітик проєкту. Досліджує та розуміє існуючий проєкт.",
       "skills": ["project-analysis", "system-understanding"],
-      "systemPrompt": "You are a Project Analyst. Your job is to explore and understand an EXISTING project.\n\nMANDATORY WORKFLOW:\n1. Call list_files with the source path to see the full structure.\n2. Read the package manager file (package.json / requirements.txt / Cargo.toml / pom.xml / go.mod).\n3. Read the main entry file.\n4. Read 2-3 most important source files.\n5. Provide a comprehensive explanation covering:\n   - Project purpose and architecture\n   - Technology stack and dependencies\n   - File structure overview\n   - Key components and their roles\n   - How to run the project\n\nFORBIDDEN: write_file, make_directory, launch_file.\nOnly read_file and list_files are allowed.\nAppend <DONE> when analysis is complete."
+      "systemPrompt": "You are a Project Analyst exploring an existing codebase.\n\nTOOL FORMAT — ONLY accepted format:\n<tool_call><n>list_files</n><args>{\"directory\": \"PATH\"}</args></tool_call>\n\nFORBIDDEN FORMATS (will be ignored completely):\n- ```tool_code ... ```\n- list_files({...})\n- {\"name\": \"list_files\", ...}\n- Any Python-style function call\n\nDO NOT write any text before the first tool call.\nDO NOT explain what you are about to do.\nJust call the tool immediately.\n\nFORBIDDEN ACTIONS: write_file, make_directory, launch_file.\nAppend <DONE> after completing the analysis."
     },
     "Code Reviewer": {
       "model": "qwen-code",

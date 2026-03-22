@@ -37,15 +37,30 @@ function tryParseArgs(raw: string): any {
                 const afterKey = inner.substring(contentStart + 10); // after "content":
                 const valueStart = afterKey.indexOf('"');
                 if (valueStart !== -1) {
-                    // Extract until the very last " before the ending } or EOF
                     const valueContent = afterKey.substring(valueStart + 1);
-                    const content = valueContent
+                    
+                    // Bug 3 FIX: Find the closing " BEFORE applying unescape
+                    let endIdx = -1;
+                    let i = 0;
+                    while (i < valueContent.length) {
+                        if (valueContent[i] === '\\') {
+                            i += 2; // skip escape sequence
+                        } else if (valueContent[i] === '"') {
+                            endIdx = i;
+                            break;
+                        } else {
+                            i++;
+                        }
+                    }
+
+                    const rawContent = endIdx >= 0 ? valueContent.substring(0, endIdx) : valueContent;
+                    const content = rawContent
                         .replace(/\\n/g, '\n')
                         .replace(/\\t/g, '\t')
                         .replace(/\\"/g, '"')
                         .replace(/\\r/g, '')
-                        .replace(/\\\\/g, '\\')
-                        .replace(/"[\s\S]*$/, ''); // remove tail after the closing "
+                        .replace(/\\\\/g, '\\');
+
                     return {
                         filename: fnMatch[1].replace(/\\\\/g, '\\'),
                         content,
@@ -89,14 +104,15 @@ export function parseToolCall(responseText: string): ToolCall | null {
         return { name: s2[1].trim(), args: tryParseArgs(s2[2]) };
     }
 
-    // Strategy 2b: XML with <args> tag (common failure: <tool_call><list_files><args>...</args></args></tool_call>)
-    const s2bre = new RegExp(
-        `<tool_call>[\\s\\S]*?<(${knownRe})>[\\s\\S]*?<args>([\\s\\S]*?)<\/args>[\\s\\S]*?<\/\\1>[\\s\\S]*?<\/tool_call>`, 'i'
-    );
-    const s2b = responseText.match(s2bre);
-    if (s2b) {
-        return { name: s2b[1].trim(), args: tryParseArgs(s2b[2]) };
-    }
+    // Strategy 2b: <tool_call><name>...<args>...</args></args></tool_call> (extra closing tag)
+    const s2bRe = new RegExp(`<tool_call>\\s*<(${knownRe})>\\s*<args>([\\s\\S]*?)<\\/args>\\s*<\\/args>\\s*<\\/\\1>\\s*<\\/tool_call>`, 'i');
+    const s2b = responseText.match(s2bRe);
+    if (s2b) return { name: s2b[1].trim(), args: tryParseArgs(s2b[2]) };
+
+    // Strategy 2c: <tool_call><known_name>...<args>...</args></tool_call> (missing closing name tag)
+    const s2cRe = new RegExp(`<tool_call>\\s*<(${knownRe})>\\s*<args>([\\s\\S]*?)<\\/args>\\s*<\\/tool_call>`, 'i');
+    const s2c = responseText.match(s2cRe);
+    if (s2c) return { name: s2c[1].trim(), args: tryParseArgs(s2c[2]) };
 
     // Strategy 3: bare <known_name>...</known_name> anywhere
     // FIX: ensure we don't match tags inside markdown code blocks
@@ -142,6 +158,24 @@ export function parseToolCall(responseText: string): ToolCall | null {
                     content: contentMatch[1],
                 }
             };
+        }
+    }
+
+    // Strategy 5b: gemma Python-style call — list_files({"directory": "..."})
+    // Also handles list_files() with no args
+    const pyCallRe = new RegExp(
+        `(?:^|\\n)\\s*(${knownRe})\\s*\\(([^)]*)\\)`, 'i'
+    );
+    const s5b = responseText.match(pyCallRe);
+    if (s5b) {
+        const name = s5b[1].trim();
+        const rawArgs = s5b[2].trim();
+        if (!rawArgs) return { name, args: {} };
+        try {
+            // може бути JSON всередині дужок: list_files({"directory": "..."})
+            return { name, args: JSON.parse(rawArgs) };
+        } catch {
+            return { name, args: { query: rawArgs } };
         }
     }
 
@@ -385,11 +419,25 @@ export function getToolsDescription(): string {
         "3. NEVER print file content in markdown when filename was specified.",
         "4. One tool call per turn — wait for <tool_result> before the next.",
         "5. After launching, append <DONE> to complete the phase.",
-        "6. CRITICAL FORMAT RULES:",
+        `DOCUMENTATION RULES:`,
+        `- Read at most 5 files before writing documentation.`,
+        `- After reading 3+ files you have enough context to write.`,
+        `- If you already read a file → DO NOT read it again.`,
+        `- Write documentation FIRST, improve later if needed.`,
+        ``,
+        `=== CORRECT FORMAT ===`,
         "7. NEVER use: ```tool_code {\"name\": \"list_files\", \"arguments\": {...}}```",
         "8. NEVER use: {\"name\": \"list_files\", \"arguments\": {...}}",
         "9. ALWAYS use ONLY this XML format:",
-        "   <tool_call><n>list_files</n><args>{\"directory\": \"...\"}</args></tool_call>",
+        `   <tool_call><n>list_files</n><args>{\"directory\": \"...\"}</args></tool_call>`,
+        ``,
+        "GEMMA-SPECIFIC REMINDER:",
+        "If you are using gemma model — these formats are REJECTED:",
+        "  WRONG: ```tool_code",
+        "  WRONG: list_files({\"directory\": \"...\"})",
+        "  WRONG: {\"name\": \"list_files\", \"arguments\": {...}}",
+        "CORRECT (only this):",
+        "  <tool_call><n>list_files</n><args>{\"directory\": \"...\"}</args></tool_call>",
         "10. Any other format will be IGNORED and the task will fail.",
         "11. Python os.makedirs(), open(), write() — FORBIDDEN. Use write_file tool instead.",
     ].join("\n");

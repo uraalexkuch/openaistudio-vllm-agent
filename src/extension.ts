@@ -903,18 +903,14 @@ function buildAnalysisCeoPrompt(
     roles: string
 ): string {
     const docGuide = taskCtx.intent === 'document' ? `
-CRITICAL DAG RULES for documentation:
-1. dependsOn values MUST be phase NAMES (not role names)
-2. "Cyber Security Specialist", "Code Reviewer" etc are ROLES, not phases
-3. CORRECT: {"name":"API Docs","role":"Technical Writer","dependsOn":["Project Analysis"]}
-4. WRONG:   {"name":"API Docs","role":"Technical Writer","dependsOn":["Project Analysis","Cyber Security Specialist"]}
-5. Keep it simple: ONE Project Analyst phase (Project Analysis), then Technical Writer phases in parallel
-6. Maximum 3 documentation sections (not 4+) to avoid context overload.
-CORRECT minimal plan:
-{"name":"Project Analysis","role":"Project Analyst","dependsOn":[]}
-{"name":"README & Architecture","role":"Technical Writer","dependsOn":["Project Analysis"]}
-{"name":"API Documentation","role":"Technical Writer","dependsOn":["Project Analysis"]}
-{"name":"Setup & User Guide","role":"Technical Writer","dependsOn":["Project Analysis"]}
+CRITICAL: Exactly 2-3 Technical Writer phases maximum (NEVER 4+).
+5. Keep it simple: ONE Project Analysis phase (Project Analyst role), then Technical Writer phases in parallel.
+6. Database schema, API, and Architecture can be combined if needed.
+CORRECT plan (use this as template):
+[{"name":"Project Analysis","role":"Project Analyst","dependsOn":[]},
+ {"name":"Architecture & API Docs","role":"Technical Writer","dependsOn":["Project Analysis"]},
+ {"name":"Setup Guide & README","role":"Technical Writer","dependsOn":["Project Analysis"]}]
+WRONG: creating 4+ parallel Technical Writer phases.
 ` : 'Build an analysis DAG. First phase MUST be "Project Analysis" (Project Analyst role) to read the code.';
     
     return [

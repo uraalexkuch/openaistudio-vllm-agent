@@ -120,6 +120,14 @@ export class ChatChain {
                 this.onEvent?.({ type: "narration", content: `📝 Підсумовую фазу: ${phase.phaseName}…` });
                 const summary = await this.summarise(phase.phaseName, rawResult, taskPrompt);
 
+                // Bug 10 FIX: Warning if Analyst summary is too short
+                if (phase.phaseName === "Project Analysis" && summary.length < 200) {
+                    this.onEvent?.({ 
+                        type: "narration", 
+                        content: "⚠️ Увага: Project Analysis видав дуже короткий звіт. Наступні фази можуть мати недостатньо контексту." 
+                    });
+                }
+
                 completedSummaries[phase.phaseName] = summary;
                 this.chatEnv[`${phase.phaseName}_output`]  = rawResult;
                 this.chatEnv[`${phase.phaseName}_summary`] = summary;

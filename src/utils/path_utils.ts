@@ -20,22 +20,17 @@ export function resolveToolPath(filename: string, readOnly = false): string {
     if (!filename) return getWorkspaceRoot();
     if (path.isAbsolute(filename)) {
         if (readOnly) return filename; // читання — без обмежень
-        const root = getWorkspaceRoot();
-        const home = os.homedir();
-        // Дозволені префікси для запису
-        const WRITE_ALLOWED = [
-            home,
-            root,
-            // Linux серверні шляхи
-            '/var/www',
-            '/opt',
-            '/srv',
-            '/home',
-        ];
 
-        const isAllowed = WRITE_ALLOWED.some(p => filename.startsWith(p));
-        if (!isAllowed) {
-            throw new Error(`Write outside allowed paths blocked: ${filename}`);
+        // Blocklist системних шляхів — безпечніше ніж allowlist
+        const SYSTEM_PATHS = process.platform === 'win32'
+            ? ['C:\\Windows', 'C:\\Program Files', 'C:\\System32', 'C:\\ProgramData', 'C:\\Recovery']
+            : ['/sys', '/proc', '/dev', '/boot', '/etc/passwd', '/etc/shadow', '/etc/sudoers'];
+
+        const isSystem = SYSTEM_PATHS.some(sp => 
+            filename.toLowerCase().startsWith(sp.toLowerCase())
+        );
+        if (isSystem) {
+            throw new Error(`Write to system path blocked: ${filename}`);
         }
         return filename;
     }
