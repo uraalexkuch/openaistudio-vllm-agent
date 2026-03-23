@@ -86,8 +86,18 @@ export class ChatAgent {
             let toolResult: string = "";
             const filePath = toolArgs.filename || toolArgs.file || toolArgs.path;
 
-            if (toolName === 'read_file' && filePath && this.readHistory.has(filePath)) {
-                toolResult = `FILE [${filePath}] ALREADY READ. Content is in context history above. DO NOT read same file twice. Proceed to analysis or other files.`;
+            // ── Read History Logic ────────────────────────────────────────────────
+            // Prevent infinite loops within the SAME turn, but allow re-reading
+            // across different turns (since memory may have been trimmed).
+            const isReadLoop = toolName === 'read_file' && filePath && this.memory.some(m => 
+                m.role === 'assistant' && 
+                m.content.includes(`<tool_call><n>read_file</n><args>{"filename": "${filePath}"}</args></tool_call>`)
+            );
+
+            if (toolName === 'read_file' && filePath && isReadLoop && toolIterations > 1) {
+                toolResult = `FILE [${filePath}] WAS ALREADY READ IN THIS TURN. ` +
+                            `Please use the content provided in the previous <tool_result>. ` +
+                            `Do NOT try to read it again. Proceed to analysis or other files.`;
             } else {
                 if (toolName === 'read_file' && filePath) this.readHistory.add(filePath);
                 toolResult = await executeTool(toolCall);
