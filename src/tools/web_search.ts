@@ -28,14 +28,26 @@ export async function web_search(query: string): Promise<string> {
             },
             history: [],
             stream: false
+        }, {
+            timeout: 120000 // 120 seconds timeout for Perplexica + Local LLM
         });
 
-        if (response.data && response.data.results) {
-            return JSON.stringify(response.data.results.slice(0, 3));
+        if (response.data) {
+            // Perplexica 1.12.1 returns the answer in 'message'
+            if (response.data.message) {
+                return response.data.message;
+            }
+            // Older versions or different endpoints might return 'results'
+            if (response.data.results) {
+                return JSON.stringify(response.data.results.slice(0, 3));
+            }
         }
-        return "No results found.";
-    } catch (error) {
+        return "No results found or empty response from Perplexica.";
+    } catch (error: any) {
         console.error("Error executing web_search via Perplexica:", error);
-        return `Error executing web_search: ${error}`;
+        if (error.code === 'ECONNABORTED') {
+            return `Error: Web search timed out after 120s. Your local Perplexica/Ollama instance might be too slow.`;
+        }
+        return `Error executing web_search: ${error.message || error}`;
     }
 }
