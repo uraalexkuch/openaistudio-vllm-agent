@@ -16,7 +16,18 @@ export async function web_search(query: string): Promise<string> {
         console.log(`Executing web_search for query: "${query}" via ${perplexicaUrl}`);
         const response = await axios.post(`${perplexicaUrl}/api/search`, {
             query,
-            searchMode: "web"
+            sources: ["web"],
+            optimizationMode: "balanced",
+            chatModel: {
+                providerId: "4a2503c9-bb5f-4cf9-8976-87e1c6147710", // DCZ Ollama New
+                key: "gpt-oss:latest"
+            },
+            embeddingModel: {
+                providerId: "ff97a883-e050-4356-bd4e-636b10b06524", // Transformers
+                key: "Xenova/all-MiniLM-L6-v2"
+            },
+            history: [],
+            stream: false
         });
 
         if (response.data && response.data.results) {
